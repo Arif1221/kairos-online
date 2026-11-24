@@ -1,6 +1,10 @@
 # Changelog
 
-Offline builds. Each version is on the [Releases](https://github.com/Arif1221/kairos/releases) page.
+## Online 0.7.6.2
+- Kairos Online moved to its own repository, Arif1221/kairos-online
+- Update check and all links now point to the new repository
+
+Entries below are the offline app's history, merged in from Arif1221/kairos.
 
 ## 0.7.6
 - New app icon, with a themed icon on Android 13+
