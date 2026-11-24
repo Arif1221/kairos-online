@@ -19,8 +19,13 @@
 
 Kairos Online plays the music already on your phone (MP3, FLAC, M4A/AAC, OGG, Opus, WAV) and streams from YouTube Music and YouTube. No account, no ads, no tracking. It is built with Jetpack Compose and Media3 (ExoPlayer).
 
-<!-- Screenshots: add phone screenshots to docs/screenshots/ and list them here, e.g.
-<p align="center"><img src="docs/screenshots/player.png" width="22%" alt="Now playing" /></p> -->
+<p align="center">
+  <img src="docs/screenshots/home.webp" width="23%" alt="Home: greeting, smart playlists and a Continue listening card" />
+  <img src="docs/screenshots/player.webp" width="23%" alt="Now playing: album art, format chip and waveform seek bar" />
+  <img src="docs/screenshots/library.webp" width="23%" alt="Library: songs with A–Z index, shuffle and sort" />
+  <img src="docs/screenshots/settings.webp" width="23%" alt="Settings: theme, colour from album art and lyrics options" />
+</p>
+<p align="center"><sub>Screens shared with offline Kairos.</sub></p>
 
 ## Features
 
