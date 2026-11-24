@@ -1,7 +1,7 @@
 # Security policy
 
 ## Supported versions
-Only the [latest release](https://github.com/Arif1221/kairos/releases/latest) receives fixes.
+Only the [latest release](https://github.com/Arif1221/kairos-online/releases/latest) receives fixes.
 
 ## Reporting a vulnerability
 Please do not open a public issue for security problems. Use GitHub's private reporting instead: **Security → Report a vulnerability** on this repository. You will get a reply within a week.

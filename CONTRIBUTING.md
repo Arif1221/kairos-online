@@ -3,13 +3,13 @@
 Thanks for helping. A few things keep this smooth for everyone.
 
 ## Reporting bugs
-Use the [bug report form](https://github.com/Arif1221/kairos/issues/new?template=bug_report.yml). The most useful reports include:
+Use the [bug report form](https://github.com/Arif1221/kairos-online/issues/new?template=bug_report.yml). The most useful reports include:
 - the Kairos version (Settings, or the release you installed) and your phone and Android version
 - the steps that cause the problem
 - if the app crashed: reopen Kairos, tap **Copy report** on the "Kairos stopped last time" message, and paste it into the issue
 
 ## Suggesting features
-Use the [feature request form](https://github.com/Arif1221/kairos/issues/new?template=feature_request.yml). Say what you want to do and why; a screenshot or sketch helps.
+Use the [feature request form](https://github.com/Arif1221/kairos-online/issues/new?template=feature_request.yml). Say what you want to do and why; a screenshot or sketch helps.
 
 ## Pull requests
 1. Open an issue first for anything bigger than a small fix, so we can agree on the approach.

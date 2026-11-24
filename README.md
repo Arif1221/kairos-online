@@ -6,16 +6,16 @@
 
 **Kairos, plus YouTube Music and YouTube (audio only): streaming, Discover, offline caching and synced lyrics, in the same player.**
 
-[![Latest release](https://img.shields.io/github/v/release/Arif1221/kairos?label=release&color=8B6CFF)](https://github.com/Arif1221/kairos/releases)
-[![Build](https://img.shields.io/github/actions/workflow/status/Arif1221/kairos/build.yml?branch=online)](https://github.com/Arif1221/kairos/actions/workflows/build.yml)
+[![Latest release](https://img.shields.io/github/v/release/Arif1221/kairos-online?label=release&color=8B6CFF)](https://github.com/Arif1221/kairos-online/releases)
+[![Build](https://img.shields.io/github/actions/workflow/status/Arif1221/kairos-online/build.yml?branch=main)](https://github.com/Arif1221/kairos-online/actions/workflows/build.yml)
 [![Android 9+](https://img.shields.io/badge/Android-9%2B-3DDC84?logo=android&logoColor=white)](#requirements)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
-[Download the APK](https://github.com/Arif1221/kairos/releases) · [Report a bug](https://github.com/Arif1221/kairos/issues/new?template=bug_report.yml) · [Request a feature](https://github.com/Arif1221/kairos/issues/new?template=feature_request.yml)
+[Download the APK](https://github.com/Arif1221/kairos-online/releases) · [Report a bug](https://github.com/Arif1221/kairos-online/issues/new?template=bug_report.yml) · [Request a feature](https://github.com/Arif1221/kairos-online/issues/new?template=feature_request.yml)
 
 </div>
 
-> This is the **`online` branch**. The offline app (Play Store) lives on [`main`](https://github.com/Arif1221/kairos/tree/main). Offline features are built there and merged in here; nothing goes back.
+> This is **Kairos Online**, in its own repository. The offline app (Play Store) is [Arif1221/kairos](https://github.com/Arif1221/kairos). Offline features are built there and merged in here; nothing goes back.
 
 Kairos Online plays the music already on your phone (MP3, FLAC, M4A/AAC, OGG, Opus, WAV) and streams from YouTube Music and YouTube. No account, no ads, no tracking. It is built with Jetpack Compose and Media3 (ExoPlayer).
 
@@ -51,7 +51,7 @@ Kairos Online plays the music already on your phone (MP3, FLAC, M4A/AAC, OGG, Op
 
 ## Download
 
-Get `app-online-release.apk` from the latest `v*-online` release on [Releases](https://github.com/Arif1221/kairos/releases). Kairos Online is not on the Play Store and never will be (it streams through an unofficial YouTube API). It installs next to offline Kairos (`com.skarif.kairos.online`).
+Get `app-online-release.apk` from the latest `v*-online` release on [Releases](https://github.com/Arif1221/kairos-online/releases). Kairos Online is not on the Play Store and never will be (it streams through an unofficial YouTube API). It installs next to offline Kairos (`com.skarif.kairos.online`).
 
 > Builds up to 0.7.5.2-online were signed with a retired key. If one is installed, uninstall it once before installing 0.7.6.1-online or later.
 
@@ -65,8 +65,8 @@ Kairos Online collects nothing and has no account. To stream, it talks to YouTub
 ## Online
 
 ### How the online build is set up
-The `online` branch keeps two Gradle flavors so `main`'s code merges in cleanly:
-- `online` (`assembleOnlineRelease`): what this branch builds and releases.
+This repo keeps two Gradle flavors so the offline repo's code merges in cleanly:
+- `online` (`assembleOnlineRelease`): what this repo builds and releases.
 - `play`: the offline app, kept only so shared code compiles both ways. It isn't built or released here.
 
 ### Online features
@@ -93,20 +93,21 @@ The `online` branch keeps two Gradle flavors so `main`'s code merges in cleanly:
 
 > NewPipeExtractor is GPL-3.0, so the online APK must be distributed under the GPL-3.0.
 
-### Keeping up with main
+### Keeping up with the offline app
 ```
-git checkout online
-git merge origin/main
+git remote add offline https://github.com/Arif1221/kairos.git   # once
+git fetch offline
+git merge offline/main
 ```
-Conflicts to expect: `versionCode`/`versionName` (keep online's numbering, ahead of main), `.github/workflows/build.yml` (keep this branch's), and `MainViewModel.mixes` (the favourites mix must read `byId`, which includes saved online songs).
+Conflicts to expect: `versionCode`/`versionName` (keep online's numbering, ahead of offline), `.github/workflows/build.yml` (keep this repo's), and `MainViewModel.mixes` (the favourites mix must read `byId`, which includes saved online songs).
 
 ## Build from source
 
 You need Android Studio Ladybug (2024.2) or newer, or JDK 17 and the Android SDK.
 
 ```bash
-git clone https://github.com/Arif1221/kairos.git
-cd kairos
+git clone https://github.com/Arif1221/kairos-online.git
+cd kairos-online
 ./gradlew assembleDebug          # debug APK in app/build/outputs/apk/debug/
 ./gradlew testReleaseUnitTest    # unit tests (lyrics parser)
 ```

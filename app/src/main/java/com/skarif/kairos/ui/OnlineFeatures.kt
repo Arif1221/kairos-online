@@ -54,7 +54,7 @@ val DISCOVER_MOODS = listOf(
     "Workout" to "workout songs", "Indie" to "indie hits", "Sad" to "sad songs", "Party" to "party songs",
 )
 
-const val REPO = "Arif1221/kairos"
+const val REPO = "Arif1221/kairos-online"
 
 /** Kairos Online ships only on GitHub, so the app checks there for a newer release itself. */
 sealed interface UpdateState {

@@ -1,6 +1,6 @@
 # Privacy policy (Kairos Online)
 
-> This is the policy for **Kairos Online** (`com.skarif.kairos.online`, the `online` branch). The offline Kairos app has its own policy on the `main` branch.
+> This is the policy for **Kairos Online** (`com.skarif.kairos.online`). The offline Kairos app has its own policy in [Arif1221/kairos](https://github.com/Arif1221/kairos/blob/main/PRIVACY.md).
 
 _Last updated: 19 November 2026_
 
@@ -54,4 +54,4 @@ If this policy changes, the new version will be published in this file with a ne
 
 ## Contact
 
-Questions: open an issue at https://github.com/Arif1221/kairos/issues.
+Questions: open an issue at https://github.com/Arif1221/kairos-online/issues.
