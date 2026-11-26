@@ -271,7 +271,7 @@ private fun CardShelf(vm: MainViewModel, title: String, subtitle: String?, items
 // ---- Explore --------------------------------------------------------------------------------
 
 @Composable
-fun ExploreScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenNowPlaying: () -> Unit) {
+fun ExploreScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenNowPlaying: () -> Unit, onDownloads: () -> Unit) {
     val o = vm.onlineUi
     val c = P.colors
     val nav = LocalOnlineNav.current
@@ -280,6 +280,7 @@ fun ExploreScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenNowPlaying: () ->
     val up by o.networkUp.collectAsStateWithLifecycle()
     val recent by o.recentlyStreamed.collectAsStateWithLifecycle()
     val offline by o.availableOffline.collectAsStateWithLifecycle()
+    val downloads by o.downloads.collectAsStateWithLifecycle()
     val update by o.update.collectAsStateWithLifecycle()
     val moodIndex by o.moodIndex.collectAsStateWithLifecycle()
     val mood by o.mood.collectAsStateWithLifecycle()
@@ -329,13 +330,28 @@ fun ExploreScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenNowPlaying: () ->
             if (!up) item(key = "offline") {
                 Banner(
                     "You're offline",
-                    if (offline.isEmpty()) "Songs you stream are saved on this phone and play here without a connection."
-                    else "${offline.size} streamed ${if (offline.size == 1) "song plays" else "songs play"} without a connection.",
+                    if (offline.isEmpty()) "Download songs (hold one, then Download) to play them without a connection."
+                    else "${offline.size} ${if (offline.size == 1) "song plays" else "songs play"} without a connection.",
                 )
             }
-            if (!up && offline.isNotEmpty()) item(key = "saved") {
-                CardShelf(vm, "Saved on this phone", null, offline.map(OnlineItem::Track), { actionsFor = it }) { item ->
-                    (item as? OnlineItem.Track)?.let { t -> play(offline, offline.indexOf(t.song), "Saved on this phone") }
+            if (downloads.isNotEmpty()) item(key = "downloads") {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(end = 18.dp), verticalAlignment = Alignment.Bottom) {
+                        Box(Modifier.weight(1f)) { ShelfTitle("Your downloads", "${downloads.size} songs · play offline") }
+                        Pill("See all", onDownloads)
+                    }
+                    LazyRow(contentPadding = PaddingValues(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        itemsIndexed(downloads.take(20), key = { _, s -> "dl${s.id}" }) { i, s ->
+                            OnlineCard(vm, OnlineItem.Track(s), onLongClick = { actionsFor = s }) { play(downloads, i, "Downloads") }
+                        }
+                    }
+                }
+            }
+            // Streamed songs still in the cache also play offline.
+            val cachedOnly = offline.filter { s -> downloads.none { it.id == s.id } }
+            if (!up && cachedOnly.isNotEmpty()) item(key = "saved") {
+                CardShelf(vm, "Also saved on this phone", null, cachedOnly.map(OnlineItem::Track), { actionsFor = it }) { item ->
+                    (item as? OnlineItem.Track)?.let { t -> play(cachedOnly, cachedOnly.indexOf(t.song), "Saved on this phone") }
                 }
             }
             if (moodIndex >= 0) {
@@ -544,6 +560,7 @@ fun OnlineCollectionScreen(vm: MainViewModel, id: String, onBack: () -> Unit, on
                 }, icon = Ic.PlaylistAdd)
             }
         }
+        item(key = "dl") { DownloadAllRow(vm, col.songs) }
         itemsIndexed(col.songs, key = { _, s -> "cs${s.id}" }) { i, s ->
             SongRow(s, s.id == now.songId, vm, number = if (col.isAlbum) i + 1 else null, favourite = s.id in favs, onLongClick = { actionsFor = s }) {
                 vm.play(col.songs, i, col.title); onOpenNowPlaying()
@@ -569,6 +586,7 @@ fun OnlineArtistScreen(vm: MainViewModel, id: String, name: String, onBack: () -
                 }
             }
         }
+        if (a.songs.isNotEmpty()) item(key = "dl") { DownloadAllRow(vm, a.songs) }
         if (a.songs.isNotEmpty()) item(key = "songs-h") { Box(Modifier.padding(top = 12.dp)) { ShelfTitle("Songs", null) } }
         val shown = if (showAll) a.songs else a.songs.take(8)
         itemsIndexed(shown, key = { _, s -> "as${s.id}" }) { i, s ->
@@ -582,6 +600,72 @@ fun OnlineArtistScreen(vm: MainViewModel, id: String, name: String, onBack: () -
         if (a.collections.isNotEmpty()) item(key = "rel") {
             Box(Modifier.padding(top = 18.dp)) {
                 CardShelf(vm, "Albums & playlists", null, a.collections, {}) { nav.collection((it as OnlineItem.Collection).id) }
+            }
+        }
+    }
+    actionsFor?.let { s -> SongActionsDialog(vm, s, onOpenAlbum = {}) { actionsFor = null } }
+}
+
+/** "Download all" for a page of songs, with how far along it is. */
+@Composable
+private fun DownloadAllRow(vm: MainViewModel, songs: List<SongEntity>) {
+    val done by vm.onlineUi.downloadedIds.collectAsStateWithLifecycle()
+    val busy by vm.onlineUi.downloading.collectAsStateWithLifecycle()
+    val have = songs.count { it.id in done }
+    val going = songs.count { it.id in busy }
+    val label = when {
+        have == songs.size -> "All ${songs.size} downloaded"
+        going > 0 -> "Downloading: $have of ${songs.size} done"
+        have > 0 -> "Download the other ${songs.size - have}"
+        else -> "Download all ${songs.size}"
+    }
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Pill(label, {
+            when {
+                going > 0 -> songs.filter { it.id in busy }.forEach(vm.onlineUi::cancelDownload)
+                have < songs.size -> vm.onlineUi.download(songs)
+            }
+        }, selected = have == songs.size, icon = if (have == songs.size) Ic.Check else if (going > 0) Ic.Close else Ic.DownArrow)
+    }
+}
+
+/** Every downloaded song: plays with no connection. */
+@Composable
+fun DownloadsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenNowPlaying: () -> Unit) {
+    val c = P.colors
+    val downloads by vm.onlineUi.downloads.collectAsStateWithLifecycle()
+    val busy by vm.onlineUi.downloading.collectAsStateWithLifecycle()
+    val bytes by vm.onlineUi.downloadBytes.collectAsStateWithLifecycle()
+    val now by vm.now.collectAsStateWithLifecycle()
+    val favs by vm.favorites.collectAsStateWithLifecycle()
+    var actionsFor by remember { mutableStateOf<SongEntity?>(null) }
+    ScreenBackground {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            flingBehavior = com.skarif.kairos.ui.motion.rememberIosFling(),
+            contentPadding = PaddingValues(bottom = 40.dp + navBarBottom() + LocalBottomClearance.current),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item(key = "head") {
+                Column(Modifier.statusBarsPadding().padding(start = 18.dp, end = 18.dp, top = 12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    CircleButton(Ic.Back, "Back", onBack)
+                    Text(mixedHeadline("Your " to false, "downloads" to true), style = T.h1, color = c.text)
+                    Text(
+                        if (downloads.isEmpty()) "Nothing downloaded yet. Hold an online song and tap Download, or use Download all on an album or playlist."
+                        else "${downloads.size} songs, ${bytes / 1_048_576} MB. They play without a connection and stay until you remove them.",
+                        style = T.body, color = c.muted,
+                    )
+                    if (busy.isNotEmpty()) Text("Downloading ${busy.size} more...", style = T.small, color = c.muted)
+                    if (downloads.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Pill("Play", { vm.play(downloads, 0, "Downloads"); onOpenNowPlaying() }, selected = true, icon = Ic.Play)
+                        Pill("Shuffle", { vm.shuffle(downloads, smart = false, from = "Downloads"); onOpenNowPlaying() }, icon = Ic.Shuffle)
+                    }
+                }
+            }
+            itemsIndexed(downloads, key = { _, s -> "d${s.id}" }) { i, s ->
+                SongRow(s, s.id == now.songId, vm, favourite = s.id in favs, onLongClick = { actionsFor = s }) {
+                    vm.play(downloads, i, "Downloads"); onOpenNowPlaying()
+                }
             }
         }
     }

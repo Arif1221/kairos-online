@@ -34,6 +34,8 @@ Kairos Online plays the music already on your phone (MP3, FLAC, M4A/AAC, OGG, Op
 - Reads lyrics embedded in the file (MP3 `USLT`/`SYLT`, FLAC Vorbis comments, M4A `©lyr`) and `.lrc` files next to your songs
 - Word-level timestamps, `[offset]` tags, and a per-song timing fix in 0.1 s steps
 - Tap a line to jump there
+- Fetch missing lyrics from LRCLIB (synced or plain, your pick), keep them in the app, or save them as `.lrc` next to the song
+- Share one or several lines as an image card in the album's colours
 
 **Sound**
 - Hi-res output (32-bit float) and bit-perfect USB output on Android 14+
@@ -46,12 +48,17 @@ Kairos Online plays the music already on your phone (MP3, FLAC, M4A/AAC, OGG, Op
 - Songs with several artists ("A feat. B") show under each of them
 - Choose which folders to scan; skip short clips
 - Playlists, favourites, and auto playlists: Most played, On repeat, Recently added, Forgotten gems, genre mixes and more
-- Listening stats: time listened, top songs and artists, streaks
+- Listening stats: time listened, top songs and artists, streaks, and a year-in-review story
+- Song radio and Smart Shuffle built from what you play together, with artists and albums spread out
+- Drag to reorder the queue; shake to reshuffle what's coming up
+- Backup and restore of favourites, playlists, history and settings to one file
 
 **Design**
 - The whole app takes its accent colour from the cover that is playing
 - One player surface: swipe the mini player up into the full player and back down
 - Swipe the cover to change song; swipe rows to play next or remove
+- A living background: the album art drifts and breathes behind every screen while music plays
+- Vinyl mode for the player, an edge glow with each new song, and a "Kairos moment" when the chorus hits
 - Light, dark and pure-black themes
 
 ## Download
@@ -82,10 +89,11 @@ This repo keeps two Gradle flavors so the offline repo's code merges in cleanly:
 - **Online radio**: tapping an online song plays it with its YouTube mix after it, and autoplay continues an online queue the same way. Local songs keep the library radio.
 - Videos play as **audio only**; video streams are never downloaded. Shorts are skipped.
 - **Settings > Streaming**: Data saver (~50 kbps), Normal (~128 kbps) or High (~160 kbps Opus), plus "Data saver on mobile data" (default on), and an **Online check** that tries search, radio and playback once and shows what works on your network.
+- **Downloads**: hold an online song and tap **Download**, or use **Download all** on an album, playlist or artist page. Downloads are kept until you remove them (separate from the stream cache) and live on the **Downloads** page and Explore.
 - **Works offline after streaming**: played songs are kept in a 1 GB stream cache (oldest go first) and replay with no connection. Explore shows **Saved on this phone** when you're offline.
 - **Synced lyrics** for online songs from [LRCLIB](https://lrclib.net) (free, no key), with the same download panel as local songs.
 - **Reliability**: YouTube requests are retried once; a song that fails to load is skipped (up to 3 in a row) instead of stopping playback. Search and Explore show an offline state and reload when the connection returns.
-- **Welcome screen** has **Just stream from YouTube Music**: no music permission needed, and the app opens on Explore.
+- **Welcome screens** for the online build: streaming in the tour, and **Just stream from YouTube Music**, which needs no music permission and opens on Explore.
 - Sharing an online song shares its YouTube Music link.
 - Online songs can be favourited, added to playlists, queued, and count in Stats. No ReplayGain for them (no file to read).
 
@@ -140,6 +148,16 @@ app/src/main/java/com/skarif/kairos/
 ├── data/        Room database, MediaScanner, SettingsStore, Lyrics and Artwork repositories
 └── lyrics/      TagReader and LrcParser (pure Java)
 ```
+
+## Developer
+
+<img src="docs/developer.jpg" width="96" align="left" alt="SK Arif Hossain" />
+
+**SK Arif Hossain** builds Kairos on his own: design, code and releases. B.Tech IT student from West Bengal, India.
+
+[Instagram](https://www.instagram.com/seeking.starlight) · [GitHub](https://github.com/Arif1221) · [LinkedIn](https://www.linkedin.com/in/skarifhossain-it)
+
+<br clear="left" />
 
 ## Contributing
 

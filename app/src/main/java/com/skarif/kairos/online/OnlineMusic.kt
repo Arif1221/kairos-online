@@ -107,6 +107,23 @@ interface OnlineMusic {
     fun clearCache(context: Context)
 
     /**
+     * Saves the whole song on the phone until [removeDownload]; unlike the stream cache, nothing
+     * evicts it. Reuses bytes already streamed. [progress] runs on a background thread (0..1).
+     * Cancelling the coroutine stops it; calling again resumes where it stopped.
+     */
+    suspend fun download(context: Context, song: SongEntity, quality: StreamQuality, progress: (Float) -> Unit)
+
+    fun isDownloaded(context: Context, song: SongEntity): Boolean
+
+    /** Video ids ([SongEntity.fileName]) of every finished download. Call off the main thread. */
+    fun downloadedIds(context: Context): Set<String>
+
+    fun downloadBytes(context: Context): Long
+
+    /** Deletes a download, finished or partial, by video id. Call off the main thread. */
+    fun removeDownload(context: Context, videoId: String)
+
+    /**
      * Plays both local files and this source's Uris. [quality] is asked each time a stream is
      * opened, so a settings or network change applies from the next song.
      */

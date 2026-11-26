@@ -499,6 +499,7 @@ fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> U
     val items = listOfNotNull(
         Triple("Home", "home", Ic.Home),
         vm.onlineName?.let { Triple("Explore", "discover", Ic.Discover) },
+        vm.onlineName?.let { Triple("Downloads", "downloads", Ic.DownArrow) },
         Triple("Library", "library", Ic.Library), Triple("Playlists", "playlists", Ic.Queue),
         Triple("Search", "search", Ic.Search), Triple("Statistics", "stats", Ic.Stats), Triple("Queue", "queue", Ic.Queue),
         Triple("Equalizer", "eq", Ic.Sliders), Triple(if (sleep.active) "Sleep timer (on)" else "Sleep timer", "sleep", Ic.Clock),

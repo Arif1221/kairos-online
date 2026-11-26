@@ -147,10 +147,10 @@ fun OnboardingScreen(vm: MainViewModel, onDone: () -> Unit) {
                 label = "onboarding",
             ) { page ->
                 when (page) {
-                    0 -> WelcomeStep()
-                    1 -> TourStep()
+                    0 -> WelcomeStep(vm.onlineName)
+                    1 -> TourStep(vm.onlineName)
                     2 -> ChoicesStep(vm)
-                    3 -> MusicStep(denied)
+                    3 -> MusicStep(denied, vm.onlineName)
                     else -> ScanStep(scan)
                 }
             }
@@ -199,7 +199,7 @@ private fun Modifier.rise(enter: Animatable<Float, *>, k: Int): Modifier = graph
 }
 
 @Composable
-private fun WelcomeStep() {
+private fun WelcomeStep(online: String?) {
     val c = P.colors
     val enter = rememberEntrance()
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -211,10 +211,12 @@ private fun WelcomeStep() {
             style = T.h1.copy(fontSize = 46.sp, lineHeight = 50.sp), color = c.text,
         )
         Text(
-            "Your music, on your phone, played beautifully. No account, no ads.",
+            if (online != null) "Your music and all of $online, played beautifully. No account, no ads."
+            else "Your music, on your phone, played beautifully. No account, no ads.",
             Modifier.rise(enter, 2), style = T.body.copy(fontSize = 17.sp, lineHeight = 24.sp), color = c.muted,
         )
         Spacer(Modifier.weight(0.15f))
+        com.skarif.kairos.ui.components.MadeBy(Modifier.rise(enter, 3))
     }
 }
 
@@ -271,32 +273,40 @@ private fun SpinningRecord(modifier: Modifier) {
 }
 
 @Composable
-private fun TourStep() {
+private fun TourStep(online: String?) {
     val c = P.colors
     val enter = rememberEntrance()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Spacer(Modifier.height(18.dp))
         Text(mixedHeadline("What " to false, "Kairos" to true, " does" to false), Modifier.rise(enter, 0), style = T.h1, color = c.text)
         Spacer(Modifier.height(4.dp))
-        TourCard(
-            Ic.Lyrics, "Lyrics that sing along",
-            "Time-synced from your files, or fetched for you. Words light up as they're sung; share your favourite lines as cards.",
+        // Online build: streaming comes first, everything else shifts down one.
+        val k = if (online != null) 1 else 0
+        if (online != null) TourCard(
+            Ic.Discover, "Stream anything",
+            "Search $online, explore picks made from what you play, and download songs to play offline.",
             Modifier.rise(enter, 1),
         )
         TourCard(
+            Ic.Lyrics, "Lyrics that sing along",
+            "Time-synced from your files, or fetched for you. Words light up as they're sung; share your favourite lines as cards.",
+            Modifier.rise(enter, 1 + k),
+        )
+        TourCard(
             Ic.Radio, "Music that knows you",
-            "Song radio, Smart Shuffle and daily mixes, made from what you actually play together. Nothing leaves your phone.",
-            Modifier.rise(enter, 2),
+            if (online != null) "Song radio, Smart Shuffle and daily mixes from your library, and endless radio from $online for anything you stream."
+            else "Song radio, Smart Shuffle and daily mixes, made from what you actually play together. Nothing leaves your phone.",
+            Modifier.rise(enter, 2 + k),
         )
         TourCard(
             Ic.Disc, "Made to feel good",
             "Colours from the album art, a background that breathes with the music, a vinyl mode, and your listening as a story.",
-            Modifier.rise(enter, 3),
+            Modifier.rise(enter, 3 + k),
         )
         TourCard(
             Ic.Sliders, "Sounds the way it should",
             "Hi-res and bit-perfect output to a USB DAC, a 10-band equalizer and volume levelling.",
-            Modifier.rise(enter, 4),
+            Modifier.rise(enter, 4 + k),
         )
     }
 }
@@ -336,7 +346,8 @@ private fun ChoicesStep(vm: MainViewModel) {
         ChoiceCard(Modifier.rise(enter, 3)) {
             ToggleRow(
                 "Fetch lyrics online", s.fetchLyricsOnline, { v -> vm.updateSettings { it.copy(fetchLyricsOnline = v) } },
-                "When a song has none, look them up on lrclib.net. Only the title, artist, album and length are sent. Off means Kairos never goes online.",
+                "When a song has none, look them up on lrclib.net. Only the title, artist, album and length are sent." +
+                    if (vm.onlineName == null) " Off means Kairos never goes online." else " Streamed songs always get lyrics from there.",
             )
         }
     }
@@ -352,7 +363,7 @@ private fun ChoiceCard(modifier: Modifier, content: @Composable ColumnScope.() -
 }
 
 @Composable
-private fun MusicStep(denied: Boolean) {
+private fun MusicStep(denied: Boolean, online: String?) {
     val c = P.colors
     val enter = rememberEntrance()
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -374,7 +385,9 @@ private fun MusicStep(denied: Boolean) {
         Spacer(Modifier.weight(0.15f))
         Text(mixedHeadline("All " to false, "your music" to true, ", right on " to false, "this phone" to true), Modifier.rise(enter, 1), style = T.h1, color = c.text)
         Text(
-            "Kairos needs to read the audio files on this phone to build your library. It never uploads them. " +
+            if (online != null) "To play the songs already on this phone, Kairos reads its audio files. It never uploads them. " +
+                "Only want to stream? Skip this; you can allow it later in Android Settings."
+            else "Kairos needs to read the audio files on this phone to build your library. It never uploads them. " +
                 "Notifications show playback controls while music plays.",
             Modifier.rise(enter, 2), style = T.body.copy(fontSize = 16.sp, lineHeight = 23.sp), color = c.muted,
         )

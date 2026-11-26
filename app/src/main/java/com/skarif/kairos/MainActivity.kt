@@ -316,7 +316,10 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                 screen("search") {
                     SearchScreen(vm, onMenu = openMenu, onOpenCollection = ::openCollection, onOpenNowPlaying = openPlayer)
                 }
-                screen("discover") { com.skarif.kairos.ui.screens.ExploreScreen(vm, onMenu = openMenu, onOpenNowPlaying = openPlayer) }
+                screen("discover") {
+                    com.skarif.kairos.ui.screens.ExploreScreen(vm, onMenu = openMenu, onOpenNowPlaying = openPlayer, onDownloads = { nav.navigate("downloads") })
+                }
+                screen("downloads") { com.skarif.kairos.ui.screens.DownloadsScreen(vm, onBack = { nav.popBackStack() }, onOpenNowPlaying = openPlayer) }
                 screen("online/collection/{id}") { e ->
                     val id = Uri.decode(e.arguments?.getString("id") ?: "")
                     com.skarif.kairos.ui.screens.OnlineCollectionScreen(vm, id, onBack = { nav.popBackStack() }, onOpenNowPlaying = openPlayer)

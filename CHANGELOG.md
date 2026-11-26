@@ -1,5 +1,11 @@
 # Changelog
 
+## Online 0.9.1.2
+- Download online songs (hold a song, then Download) and whole albums, playlists and artists (Download all); downloads play offline and are never evicted
+- Downloads page (menu and Explore), with storage and Remove all in Settings > Streaming
+- "Made by" card in Settings and on the welcome screen
+- Welcome screens updated for streaming
+
 ## Online 0.9.1.1
 - Everything from offline Kairos 0.9.1: living album-art background, new menus, lyrics download and share cards, vinyl player, queue dragging, smarter shuffle and radio, new welcome screens and icon
 - New Explore: Quick picks from mixes of what you play, Jump back in, your artists, playlists, new releases, charts and mood pages; opens instantly from the last visit

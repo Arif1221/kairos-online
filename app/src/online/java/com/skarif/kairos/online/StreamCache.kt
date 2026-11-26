@@ -8,35 +8,47 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.cache.ContentMetadata
+import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import java.io.File
 
 /**
- * Songs streamed once are kept on disk (up to [MAX_BYTES], least recently played go first),
- * so they replay without a connection and seeking doesn't re-download.
+ * Two caches. Songs streamed once are kept (up to [MAX_BYTES], least recently played go first),
+ * so they replay without a connection and seeking doesn't re-download. Songs you download go to
+ * a second cache that never evicts, in app storage (not the cache folder Android may clear).
  */
 @OptIn(UnstableApi::class)
 internal object StreamCache {
     private const val MAX_BYTES = 1024L * 1024 * 1024 // 1 GB
 
-    @Volatile private var instance: SimpleCache? = null
+    @Volatile private var db: StandaloneDatabaseProvider? = null
+    @Volatile private var streams: SimpleCache? = null
+    @Volatile private var saved: SimpleCache? = null
 
-    /** One instance per folder per process, as SimpleCache requires. */
-    fun get(context: Context): SimpleCache = instance ?: synchronized(this) {
-        instance ?: SimpleCache(
-            File(context.applicationContext.cacheDir, "streams"),
-            LeastRecentlyUsedCacheEvictor(MAX_BYTES),
-            StandaloneDatabaseProvider(context.applicationContext),
-        ).also { instance = it }
+    /** One database for both caches; each SimpleCache is one per folder per process, as it requires. */
+    private fun db(context: Context) = db ?: synchronized(this) {
+        db ?: StandaloneDatabaseProvider(context.applicationContext).also { db = it }
+    }
+
+    fun get(context: Context): SimpleCache = streams ?: synchronized(this) {
+        streams ?: SimpleCache(File(context.applicationContext.cacheDir, "streams"), LeastRecentlyUsedCacheEvictor(MAX_BYTES), db(context))
+            .also { streams = it }
+    }
+
+    fun downloads(context: Context): SimpleCache = saved ?: synchronized(this) {
+        saved ?: SimpleCache(File(context.applicationContext.filesDir, "downloads"), NoOpCacheEvictor(), db(context))
+            .also { saved = it }
     }
 
     /** Fully cached under [key]: the length is known and every byte is on disk. */
-    fun isComplete(context: Context, key: String): Boolean {
-        val cache = get(context)
+    fun isComplete(cache: Cache, key: String): Boolean {
         val length = ContentMetadata.getContentLength(cache.getContentMetadata(key))
         return length > 0 && cache.isCached(key, 0, length)
     }
+
+    fun isComplete(context: Context, key: String): Boolean = isComplete(get(context), key)
 
     fun clear(context: Context) {
         val cache = get(context)

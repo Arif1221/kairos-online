@@ -39,6 +39,9 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -115,6 +118,8 @@ class OnlineFeatures(
     private val scope: CoroutineScope,
     /** Records songs seen in results, so they can be saved when favourited or added to a playlist. */
     private val seen: (List<SongEntity>) -> Unit,
+    /** Shows a short message (download finished or failed). */
+    private val notify: (String) -> Unit = {},
 ) {
     private val source = Flavor.online
 
@@ -173,6 +178,114 @@ class OnlineFeatures(
             s.clearCache(app)
             _cacheBytes.value = s.cacheBytes(app)
             cacheChanged.value++
+        }
+    }
+
+    // ---- Downloads ----------------------------------------------------------------------------
+
+    /** Songs waiting or downloading, by id, with progress 0..1 (0 while waiting). */
+    private val _downloading = MutableStateFlow<Map<Long, Float>>(emptyMap())
+    val downloading: StateFlow<Map<Long, Float>> = _downloading.asStateFlow()
+
+    /** Video ids of finished downloads. */
+    private val _downloaded = MutableStateFlow<Set<String>>(emptySet())
+    val downloadedIds: StateFlow<Set<Long>> = _downloaded.map { ids -> ids.mapTo(HashSet(), ::onlineId) }
+        .stateIn(scope, SharingStarted.Eagerly, emptySet())
+
+    /** Downloaded songs, newest first. They play with no connection and are never evicted. */
+    val downloads: StateFlow<List<SongEntity>> = combine(ct.db.songs().observeAll(), _downloaded) { songs, ids ->
+        songs.filter { it.isOnline && it.fileName in ids }.sortedByDescending { it.dateAddedSec }
+    }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val _downloadBytes = MutableStateFlow(0L)
+    val downloadBytes: StateFlow<Long> = _downloadBytes.asStateFlow()
+
+    private val queue = Channel<SongEntity>(Channel.UNLIMITED)
+    private val jobs = java.util.concurrent.ConcurrentHashMap<Long, Job>()
+
+    private fun refreshDownloads() {
+        val s = source ?: return
+        scope.launch(Dispatchers.IO) {
+            _downloaded.value = s.downloadedIds(app)
+            _downloadBytes.value = s.downloadBytes(app)
+        }
+    }
+
+    /** Queues [songs] for download, one at a time; already downloaded or queued ones are skipped. */
+    fun download(songs: List<SongEntity>) {
+        if (source == null) return
+        val todo = songs.filter { it.isOnline && it.fileName !in _downloaded.value && it.id !in _downloading.value }.distinctBy { it.id }
+        if (todo.isEmpty()) return
+        if (!networkUp.value) { notify("Downloading needs a connection"); return }
+        _downloading.update { m -> m + todo.associate { it.id to 0f } }
+        scope.launch {
+            // Downloads need their rows, so they show up offline under Downloads.
+            ct.db.songs().upsertAll(todo)
+            todo.forEach { queue.send(it) }
+        }
+        notify(if (todo.size == 1) "Downloading ${todo[0].title}" else "Downloading ${todo.size} songs")
+    }
+
+    /** Stops a download (or takes it out of the queue) and deletes what was saved of it. */
+    fun cancelDownload(song: SongEntity) {
+        _downloading.update { it - song.id }
+        jobs.remove(song.id)?.cancel()
+        scope.launch(Dispatchers.IO) { source?.removeDownload(app, song.fileName); refreshDownloads() }
+    }
+
+    fun removeDownload(song: SongEntity) {
+        val s = source ?: return
+        scope.launch(Dispatchers.IO) {
+            s.removeDownload(app, song.fileName)
+            refreshDownloads()
+            cacheChanged.value++
+        }
+    }
+
+    fun removeAllDownloads() {
+        val s = source ?: return
+        _downloading.value.keys.forEach { jobs.remove(it)?.cancel() }
+        _downloading.value = emptyMap()
+        scope.launch(Dispatchers.IO) {
+            s.downloadedIds(app).forEach { s.removeDownload(app, it) }
+            refreshDownloads()
+            cacheChanged.value++
+        }
+    }
+
+    private suspend fun runDownloads() {
+        val s = source ?: return
+        for (song in queue) {
+            if (song.id !in _downloading.value) continue // cancelled while waiting
+            var failed: Exception? = null
+            val job = scope.launch {
+                var shown = 0f
+                try {
+                    s.download(app, song, ct.settings.settings.value.streamQuality) { p ->
+                        // Every 2%: enough to look alive, few enough not to redraw lists constantly.
+                        if (p - shown >= 0.02f || p >= 1f) {
+                            shown = p
+                            _downloading.update { if (song.id in it) it + (song.id to p) else it }
+                        }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failed = e
+                }
+            }
+            jobs[song.id] = job
+            job.join()
+            jobs.remove(song.id)
+            val wasCancelled = song.id !in _downloading.value
+            _downloading.update { it - song.id }
+            refreshDownloads()
+            cacheChanged.value++
+            when {
+                wasCancelled -> {}
+                failed != null -> notify(if (networkUp.value) "Couldn't download ${song.title}" else "Download paused: you're offline")
+                _downloading.value.isEmpty() -> notify("Downloaded ${song.title}")
+            }
         }
     }
 
@@ -514,6 +627,8 @@ class OnlineFeatures(
 
     init {
         if (source != null) {
+            refreshDownloads()
+            scope.launch { runDownloads() }
             // One quiet update check per launch, once there is a connection.
             scope.launch {
                 networkUp.filter { it }.first()

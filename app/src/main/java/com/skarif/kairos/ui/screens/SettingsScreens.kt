@@ -38,6 +38,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.skarif.kairos.data.LyricsPreference
 import com.skarif.kairos.data.OutputMode
@@ -317,6 +318,8 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onFolders: () -> Unit,
                 }
             }
 
+            com.skarif.kairos.ui.components.DeveloperCard()
+
             Pill("Equalizer", onEqualizer, icon = Ic.Sliders, big = true, modifier = Modifier.fillMaxWidth())
     }
 }
@@ -385,10 +388,25 @@ private fun StreamingCard(vm: MainViewModel, source: String) {
             "Uses ${com.skarif.kairos.data.StreamQuality.LOW.label} quality when you're not on Wi-Fi",
         )
         Text(
-            "Saved on this phone: ${cacheBytes / 1_048_576} MB of 1024 MB. Songs you stream are kept so they play without a connection; the oldest go first.",
+            "Recently streamed, kept for offline: ${cacheBytes / 1_048_576} MB of 1024 MB; the oldest go first.",
             style = T.small, color = c.muted,
         )
         Pill("Clear saved songs", { vm.onlineUi.clearCache() }, icon = Ic.Trash)
+        val dlBytes by vm.onlineUi.downloadBytes.collectAsStateWithLifecycle()
+        val dlCount = vm.onlineUi.downloadedIds.collectAsStateWithLifecycle().value.size
+        Text(
+            if (dlCount == 0) "Downloads: none. Hold an online song and tap Download to keep it on this phone."
+            else "Downloads: $dlCount songs, ${dlBytes / 1_048_576} MB. Clearing saved songs above doesn't touch them.",
+            style = T.small, color = c.muted,
+        )
+        var confirmRemove by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+        if (dlCount > 0) Pill("Remove all downloads", { confirmRemove = true }, icon = Ic.Trash)
+        if (confirmRemove) ConfirmDialog(
+            "Remove all downloads?",
+            "$dlCount songs will need a connection again. Favourites and playlists keep them.",
+            confirm = "Remove", dismiss = "Keep",
+            onConfirm = { vm.onlineUi.removeAllDownloads(); confirmRemove = false }, onDismiss = { confirmRemove = false },
+        )
         Text("Online check", style = T.title, color = c.text)
         Text("Tries search, radio and playback once, to see what works on your network.", style = T.small, color = c.muted)
         when (val st = checks) {
@@ -443,3 +461,4 @@ private fun OnlineAboutCard(vm: MainViewModel) {
         }
     }
 }
+

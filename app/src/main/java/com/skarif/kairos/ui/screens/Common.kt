@@ -186,16 +186,29 @@ fun SongActionsDialog(
         if (fav) "Favourited" else "Favourite", if (fav) Ic.HeartFilled else Ic.Heart, selected = fav,
     ) { vm.toggleFavorite(song.id) }
     val shareAction = SheetAction("Share", Ic.Share) { shareSong(ctx, song) }
+    // Online songs: download to keep on the phone (the online build only).
+    val online = song.volume == com.skarif.kairos.data.db.ONLINE_VOLUME && vm.onlineName != null
+    val downloaded = vm.onlineUi.downloadedIds.collectAsStateWithLifecycle().value
+    val downloading = vm.onlineUi.downloading.collectAsStateWithLifecycle().value
+    val downloadAction = when {
+        !online -> null
+        song.id in downloaded -> SheetAction("Downloaded", Ic.Check, selected = true) {
+            vm.onlineUi.removeDownload(song)
+            vm.notify("Removed the download of ${song.title}")
+        }
+        song.id in downloading -> SheetAction("${(downloading.getValue(song.id) * 100).toInt()}%  Cancel", Ic.Close) { vm.onlineUi.cancelDownload(song) }
+        else -> SheetAction("Download", Ic.DownArrow) { vm.onlineUi.download(listOf(song)) }
+    }
 
     val quick = if (queueIndex != null) listOfNotNull(
         SheetAction("Play now", Ic.Play) { vm.playQueueItem(queueIndex) },
         // Reordering follows the unshuffled order, so it is only offered with shuffle off.
         if (!shuffleOn) SheetAction("Play next", Ic.Queue) { vm.moveToNext(queueIndex) } else null,
         favAction, shareAction,
-    ) else listOf(
+    ) else listOfNotNull(
         SheetAction("Play next", Ic.Queue) { vm.playNext(listOf(song)); vm.notify("Plays next") },
         SheetAction("Add to queue", Ic.AddQueue) { vm.addToQueue(listOf(song)) },
-        favAction, shareAction,
+        favAction, downloadAction ?: shareAction,
     )
 
     val here = buildList {
@@ -214,6 +227,8 @@ fun SongActionsDialog(
 
     val go = buildList {
         add(addToPlaylistAction(vm, playlists, listOf(song.id)))
+        // Online songs: Download takes Share's quick slot (in the queue menu it goes here instead).
+        if (downloadAction != null) add(if (queueIndex == null) shareAction else downloadAction)
         if (song.volume == com.skarif.kairos.data.db.ONLINE_VOLUME) {
             // Online songs have no album or artist page in the library; find the artist online instead.
             com.skarif.kairos.data.splitArtists(song.artist).take(3).forEach { a ->

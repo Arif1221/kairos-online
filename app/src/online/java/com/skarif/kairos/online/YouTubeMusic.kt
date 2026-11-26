@@ -8,7 +8,12 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.CacheWriter
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import com.skarif.kairos.data.StreamQuality
 import com.skarif.kairos.data.db.ONLINE_VOLUME
 import com.skarif.kairos.data.db.SongEntity
@@ -307,7 +312,7 @@ internal object YouTubeMusic : OnlineMusic {
     private fun cacheKey(videoId: String, q: StreamQuality) = "yt:$videoId:$q"
 
     override fun isCached(context: Context, song: SongEntity): Boolean =
-        StreamQuality.entries.any { StreamCache.isComplete(context, cacheKey(song.fileName, it)) }
+        isDownloaded(context, song) || StreamQuality.entries.any { StreamCache.isComplete(context, cacheKey(song.fileName, it)) }
 
     override fun cacheBytes(context: Context): Long = StreamCache.get(context).cacheSpace
 
@@ -316,27 +321,95 @@ internal object YouTubeMusic : OnlineMusic {
         pinned.clear()
     }
 
-    /** Which quality to use for [videoId]: already pinned, else one fully cached (plays offline), else the setting. */
+    // ---- Downloads ---------------------------------------------------------------------------
+
+    override fun isDownloaded(context: Context, song: SongEntity): Boolean {
+        val saved = StreamCache.downloads(context)
+        return StreamQuality.entries.any { StreamCache.isComplete(saved, cacheKey(song.fileName, it)) }
+    }
+
+    override fun downloadedIds(context: Context): Set<String> {
+        val saved = StreamCache.downloads(context)
+        return saved.keys.filter { StreamCache.isComplete(saved, it) }.mapNotNullTo(HashSet()) { it.split(':').getOrNull(1) }
+    }
+
+    override fun downloadBytes(context: Context): Long = StreamCache.downloads(context).cacheSpace
+
+    override fun removeDownload(context: Context, videoId: String) {
+        val saved = StreamCache.downloads(context)
+        StreamQuality.entries.forEach { saved.removeResource(cacheKey(videoId, it)) }
+    }
+
+    override suspend fun download(context: Context, song: SongEntity, quality: StreamQuality, progress: (Float) -> Unit) {
+        withContext(Dispatchers.IO) {
+            val app = context.applicationContext
+            val id = song.fileName
+            // The quality it's already playing or streamed at, so those bytes are reused instead of fetched again.
+            val q = pinned[id]
+                ?: StreamQuality.entries.reversed().firstOrNull { StreamCache.isComplete(app, cacheKey(id, it)) }
+                ?: quality
+            pinned.putIfAbsent(id, q)
+            val key = cacheKey(id, q)
+            val streamed = CacheDataSource.Factory()
+                .setCache(StreamCache.get(app))
+                .setCacheWriteDataSinkFactory(null) // read what's there, don't fill the stream cache too
+                .setUpstreamDataSourceFactory(resolving { q })
+                .setCacheKeyFactory { key }
+            val source = CacheDataSource.Factory()
+                .setCache(StreamCache.downloads(app))
+                .setUpstreamDataSourceFactory(streamed)
+                .setCacheKeyFactory { key }
+                .createDataSource()
+            val spec = DataSpec.Builder().setUri(mediaUri(song)).setKey(key).build()
+            val writer = CacheWriter(source, spec, null) { length, done, _ -> if (length > 0) progress(done.toFloat() / length) }
+            coroutineScope {
+                val work = async(Dispatchers.IO) { writer.cache() }
+                try {
+                    work.await()
+                } catch (e: CancellationException) {
+                    writer.cancel() // CacheWriter blocks its thread; this makes it stop
+                    throw e
+                }
+            }
+            if (!StreamCache.isComplete(StreamCache.downloads(app), key)) throw IOException("Download of $id didn't finish")
+        }
+    }
+
+    /** Which quality to use for [videoId]: already pinned, else one downloaded or fully cached (plays offline), else the setting. */
     private fun qualityFor(context: Context, videoId: String, setting: () -> StreamQuality): StreamQuality =
         pinned.getOrPut(videoId) {
-            StreamQuality.entries.reversed().firstOrNull { StreamCache.isComplete(context, cacheKey(videoId, it)) } ?: setting()
+            val saved = StreamCache.downloads(context)
+            StreamQuality.entries.reversed().firstOrNull { StreamCache.isComplete(saved, cacheKey(videoId, it)) }
+                ?: StreamQuality.entries.reversed().firstOrNull { StreamCache.isComplete(context, cacheKey(videoId, it)) }
+                ?: setting()
         }
+
+    private val http by lazy {
+        DefaultHttpDataSource.Factory()
+            .setUserAgent(NewPipeDownloader.USER_AGENT)
+            .setAllowCrossProtocolRedirects(true)
+    }
+
+    /** Our Uris become the real stream URL only when bytes are actually fetched, so URLs are always fresh. */
+    private fun resolving(quality: (String) -> StreamQuality) = ResolvingDataSource.Factory(http) { spec ->
+        val id = spec.uri.schemeSpecificPart
+        spec.withUri(Uri.parse(streamUrl(id, quality(id))))
+    }
 
     override fun dataSourceFactory(context: Context, quality: () -> StreamQuality): DataSource.Factory {
         val app = context.applicationContext
-        val http = DefaultHttpDataSource.Factory()
-            .setUserAgent(NewPipeDownloader.USER_AGENT)
-            .setAllowCrossProtocolRedirects(true)
-        // Our Uris become the real stream URL only when bytes are missing from the cache,
-        // so URLs are always fresh (they expire) and cached songs need no network at all.
-        val resolving = ResolvingDataSource.Factory(http) { spec ->
-            val id = spec.uri.schemeSpecificPart
-            spec.withUri(Uri.parse(streamUrl(id, qualityFor(app, id, quality))))
-        }
-        val cached = CacheDataSource.Factory()
+        val key = { spec: DataSpec -> spec.uri.schemeSpecificPart.let { cacheKey(it, qualityFor(app, it, quality)) } }
+        // Downloads first (read only), then the stream cache, then the network.
+        val streamed = CacheDataSource.Factory()
             .setCache(StreamCache.get(app))
-            .setUpstreamDataSourceFactory(resolving)
-            .setCacheKeyFactory { spec -> spec.uri.schemeSpecificPart.let { cacheKey(it, qualityFor(app, it, quality)) } }
+            .setUpstreamDataSourceFactory(resolving { qualityFor(app, it, quality) })
+            .setCacheKeyFactory(key)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        val cached = CacheDataSource.Factory()
+            .setCache(StreamCache.downloads(app))
+            .setCacheWriteDataSinkFactory(null)
+            .setUpstreamDataSourceFactory(streamed)
+            .setCacheKeyFactory(key)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         val local = DefaultDataSource.Factory(app)
         return DataSource.Factory { RoutingDataSource(SCHEME, local.createDataSource(), cached.createDataSource()) }
