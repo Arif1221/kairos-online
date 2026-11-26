@@ -344,6 +344,43 @@ class OnlineFeatures(
         }
     }
 
+    // ---- Liked artists, albums and playlists -----------------------------------------------------
+
+    /** Saved as JSON on the phone, newest first, so the Library tiles work offline. */
+    private val likesPrefs = app.getSharedPreferences("liked_online", android.content.Context.MODE_PRIVATE)
+
+    private fun loadLikes(key: String): List<OnlineItem> = runCatching {
+        val arr = JSONArray(likesPrefs.getString(key, "[]"))
+        (0 until arr.length()).mapNotNull { itemFromJson(arr.getJSONObject(it)) }
+    }.getOrDefault(emptyList())
+
+    private val _likedArtists = MutableStateFlow(loadLikes("artists").filterIsInstance<OnlineItem.Artist>())
+    val likedArtists: StateFlow<List<OnlineItem.Artist>> = _likedArtists.asStateFlow()
+    private val _likedCollections = MutableStateFlow(loadLikes("collections").filterIsInstance<OnlineItem.Collection>())
+    val likedCollections: StateFlow<List<OnlineItem.Collection>> = _likedCollections.asStateFlow()
+
+    private fun saveLikes(key: String, items: List<OnlineItem>) =
+        likesPrefs.edit().putString(key, JSONArray().apply { items.forEach { put(it.toJson()) } }.toString()).apply()
+
+    fun isLiked(id: String) = _likedArtists.value.any { it.id == id } || _likedCollections.value.any { it.id == id }
+
+    /** Likes or unlikes an artist (by channel id; artists found by name are matched by name too). */
+    fun toggleLike(artist: OnlineItem.Artist) {
+        val had = _likedArtists.value.any { it.id == artist.id || it.name.equals(artist.name, true) }
+        _likedArtists.value = if (had) _likedArtists.value.filterNot { it.id == artist.id || it.name.equals(artist.name, true) }
+        else listOf(artist) + _likedArtists.value
+        saveLikes("artists", _likedArtists.value)
+        notify(if (had) "Removed ${artist.name} from your artists" else "Added ${artist.name} to your artists")
+    }
+
+    fun toggleLike(collection: OnlineItem.Collection) {
+        val had = _likedCollections.value.any { it.id == collection.id }
+        _likedCollections.value = if (had) _likedCollections.value.filterNot { it.id == collection.id }
+        else listOf(collection) + _likedCollections.value
+        saveLikes("collections", _likedCollections.value)
+        notify(if (had) "Removed ${collection.title} from your albums" else "Added ${collection.title} to your albums")
+    }
+
     // ---- Search ----------------------------------------------------------------------------
 
     private val query = MutableStateFlow("")
@@ -417,7 +454,7 @@ class OnlineFeatures(
     suspend fun artist(id: String, name: String): Loadable<OnlineArtist> {
         val s = source ?: return Loadable.Failed("Not available")
         return try {
-            val channel = if (id.isNotBlank() && id != "_") id else
+            val channel = if (id.isNotBlank() && id != "_" && !id.startsWith("_:")) id else
                 (s.search(name, OnlineKind.ARTISTS).items.firstOrNull() as? OnlineItem.Artist)?.id ?: ""
             Loadable.Ready(s.artist(channel, name).also { seen(it.songs) })
         }
@@ -515,10 +552,13 @@ class OnlineFeatures(
             safe { tracks(a, 12).takeIf { it.size >= 3 }?.let { Shelf("more:$a", "More from $a", null, ShelfStyle.CARDS, it) } }
         }
         val artists = safe {
-            val names = topArtists.ifEmpty { listOf("Arijit Singh", "Taylor Swift", "Diljit Dosanjh", "The Weeknd") }
+            // Artists you liked first, then the ones you play most.
+            val liked = _likedArtists.value
+            val names = topArtists.filter { n -> liked.none { it.name.equals(n, true) } }
+                .ifEmpty { if (liked.isEmpty()) listOf("Arijit Singh", "Taylor Swift", "Diljit Dosanjh", "The Weeknd") else emptyList() }
             val found = names.map { n -> async { runCatching { s.search(n, OnlineKind.ARTISTS).items.firstOrNull() }.getOrNull() } }.awaitAll()
-            found.filterNotNull().distinctBy { it.key }.takeIf { it.size >= 2 }
-                ?.let { Shelf("artists", if (topArtists.isEmpty()) "Artists to try" else "Your artists", null, ShelfStyle.ARTISTS, it) }
+            (liked + found.filterNotNull()).distinctBy { it.key }.takeIf { it.size >= 2 }
+                ?.let { Shelf("artists", if (topArtists.isEmpty() && liked.isEmpty()) "Artists to try" else "Your artists", null, ShelfStyle.ARTISTS, it) }
         }
         val playlists = safe {
             val q = topArtists.firstOrNull()?.let { "$it hits" } ?: "top hits ${now.year}"

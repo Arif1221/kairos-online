@@ -85,7 +85,8 @@ This repo keeps two Gradle flavors so the offline repo's code merges in cleanly:
 
 - **Same dock as offline Kairos**: Home · Library · ▶ Now playing · Stats · Search.
 - **Home** (streaming and your phone together): **Quick picks** woven from YouTube mixes of the songs you play most, **Jump back in** (streamed and local), **Your downloads**, **Made for you** mixes, then **Your artists**, **Playlists for you**, **New releases** and **Charts**. Mood chips (Chill, Party, Focus, Bollywood, Lo-fi...) switch Home to playlists and songs for that mood. Online shelves are saved on the phone, so Home opens instantly and refreshes every 6 hours.
-- **Library**: tiles for **Favourites, Playlists, Downloads and Recently played** (streamed or not) above the music files on this phone.
+- **Library**: tiles for **Favourites, Playlists, liked Artists, liked Albums, Downloads and Recently played** (streamed or not) above the music files on this phone.
+- **Like** online artists, albums and playlists from their pages; liked artists lead Home's "Your artists".
 - **Search**: one box for YouTube Music and this phone. Matches on this phone come first; chips filter **Songs, Videos, Artists, Albums & playlists** or **On this phone**. Suggestions as you type, more results as you scroll. Where YouTube Music's song search comes back empty, music videos are ranked instead (official audio first; covers, reactions, mashups and jukeboxes last) and their titles tidied ("Artist - Song (Official Video)" becomes "Song" by "Artist").
 - **Tips** on Home, Library, Search and Downloads explain what each part does; close them once, or bring them back in Settings.
 - **In-app updates**: when a new version is out, a popup shows what's new; **Update now** downloads it and installs it over the current version. On Android 12+ that needs no confirmation once you've let Kairos install updates (asked the first time). Android only installs it if it's signed with the same key.

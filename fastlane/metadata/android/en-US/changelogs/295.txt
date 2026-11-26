@@ -1,0 +1,2 @@
+• Like artists, albums and playlists; find them in Library
+• Fix: Shuffle button drawn over the Favourites tile

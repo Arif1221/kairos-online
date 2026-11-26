@@ -1,5 +1,10 @@
 # Changelog
 
+## Online 0.9.1.5
+- Like artists, albums and playlists; find them under Library > Artists and Albums
+- Liked artists lead Home's "Your artists"
+- Fix: Library's Shuffle button was drawn over the Favourites tile
+
 ## Online 0.9.1.4
 - One Home for streaming and your phone: Quick picks, Jump back in, downloads, your mixes and online shelves together
 - Same dock as offline Kairos: Home, Library, Now playing, Stats, Search

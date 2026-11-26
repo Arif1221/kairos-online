@@ -162,13 +162,16 @@ private fun OnlineCard(vm: MainViewModel, item: OnlineItem, onLongClick: (() -> 
 /** A list row for artists, albums and playlists (songs use [SongRow]). */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun OnlinePageRow(vm: MainViewModel, item: OnlineItem, onClick: () -> Unit) {
+private fun OnlinePageRow(vm: MainViewModel, item: OnlineItem, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     val c = P.colors
     val interaction = remember { MutableInteractionSource() }
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp).pressScale(interaction, 0.97f)
             .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
-            .combinedClickable(interactionSource = interaction, indication = androidx.compose.material3.ripple(), role = Role.Button, onClick = onClick)
+            .combinedClickable(
+                interactionSource = interaction, indication = androidx.compose.material3.ripple(), role = Role.Button,
+                onLongClickLabel = if (onLongClick != null) "Remove" else null, onLongClick = onLongClick, onClick = onClick,
+            )
             .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -548,7 +551,10 @@ private fun PageHeader(
             Text(title, style = T.h1.copy(fontSize = 28.sp, lineHeight = 32.sp), color = c.text, textAlign = TextAlign.Center, maxLines = 3, overflow = TextOverflow.Ellipsis)
             sub?.let { Text(it, style = T.body, color = c.muted, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis) }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { actions() }
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) { actions() }
     }
 }
 
@@ -597,9 +603,14 @@ fun OnlineCollectionScreen(vm: MainViewModel, id: String, onBack: () -> Unit, on
             ) {
                 Pill("Play", { vm.play(col.songs, 0, col.title); onOpenNowPlaying() }, selected = true, icon = Ic.Play)
                 Pill("Shuffle", { vm.shuffle(col.songs, smart = false, from = col.title); onOpenNowPlaying() }, icon = Ic.Shuffle)
-                Pill("Save", {
+                val liked by vm.onlineUi.likedCollections.collectAsStateWithLifecycle()
+                val isLiked = liked.any { it.id == id }
+                Pill(if (isLiked) "Liked" else "Like", {
+                    vm.onlineUi.toggleLike(OnlineItem.Collection(id, col.title, col.owner, col.art, col.isAlbum, col.songs.size))
+                }, selected = isLiked, icon = if (isLiked) Ic.HeartFilled else Ic.Heart)
+                Pill("Copy to playlists", {
                     vm.createPlaylist(col.title, col.songs.map { it.id })
-                    vm.notify("Saved as a playlist")
+                    vm.notify("Copied to your playlists")
                 }, icon = Ic.PlaylistAdd)
             }
         }
@@ -623,6 +634,12 @@ fun OnlineArtistScreen(vm: MainViewModel, id: String, name: String, onBack: () -
     LoadPage<OnlineArtist>({ vm.onlineUi.artist(id, name) }, onBack) { a ->
         item(key = "head") {
             PageHeader(vm, a.art, true, "Artist", a.name, "${a.songs.size} songs", onBack) {
+                val liked by vm.onlineUi.likedArtists.collectAsStateWithLifecycle()
+                val isLiked = liked.any { it.id == id || it.name.equals(a.name, true) }
+                Pill(if (isLiked) "Liked" else "Like", {
+                    // Found by name (from the player): keep the name as the id until a real one is known.
+                    vm.onlineUi.toggleLike(OnlineItem.Artist(if (id == "_") "_:${a.name}" else id, a.name, a.art, "${a.songs.size} songs"))
+                }, selected = isLiked, icon = if (isLiked) Ic.HeartFilled else Ic.Heart)
                 if (a.songs.isNotEmpty()) {
                     Pill("Shuffle", { vm.shuffle(a.songs, smart = false, from = a.name); onOpenNowPlaying() }, selected = true, icon = Ic.Shuffle)
                     Pill("Radio", { vm.startRadio(a.songs.first()); onOpenNowPlaying() }, icon = Ic.Radio)
@@ -843,4 +860,49 @@ fun UpdateDialog(vm: MainViewModel) {
         },
         dismissButton = { if (!busy) Pill("Later", { o.skipUpdate(u.version) }) },
     )
+}
+
+/** Library > Artists or Albums: what you liked online. Works offline (the list is saved on the phone). */
+@Composable
+fun LikedOnlineScreen(vm: MainViewModel, artists: Boolean, onBack: () -> Unit) {
+    val c = P.colors
+    val nav = LocalOnlineNav.current
+    val likedArtists by vm.onlineUi.likedArtists.collectAsStateWithLifecycle()
+    val likedCollections by vm.onlineUi.likedCollections.collectAsStateWithLifecycle()
+    val items: List<OnlineItem> = if (artists) likedArtists else likedCollections
+    ScreenBackground {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            flingBehavior = com.skarif.kairos.ui.motion.rememberIosFling(),
+            contentPadding = PaddingValues(bottom = 40.dp + navBarBottom() + LocalBottomClearance.current),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            item(key = "head") {
+                Column(Modifier.statusBarsPadding().padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    CircleButton(Ic.Back, "Back", onBack)
+                    Text(mixedHeadline("Your " to false, (if (artists) "artists" else "albums") to true), style = T.h1, color = c.text)
+                    Text(
+                        if (items.isEmpty()) (if (artists) "Open an artist and tap Like to keep them here." else "Open an album or playlist and tap Like to keep it here.")
+                        else "${items.size} liked. Hold one to remove it.",
+                        style = T.body, color = c.muted,
+                    )
+                }
+            }
+            items(items, key = { it.key }) { item ->
+                OnlinePageRow(vm, item, onLongClick = {
+                    when (item) {
+                        is OnlineItem.Artist -> vm.onlineUi.toggleLike(item)
+                        is OnlineItem.Collection -> vm.onlineUi.toggleLike(item)
+                        else -> {}
+                    }
+                }) {
+                    when (item) {
+                        is OnlineItem.Artist -> nav.artist(if (item.id.startsWith("_:")) "_" else item.id, item.name)
+                        is OnlineItem.Collection -> nav.collection(item.id)
+                        else -> {}
+                    }
+                }
+            }
+        }
+    }
 }

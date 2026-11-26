@@ -248,13 +248,16 @@ fun LibraryScreen(
                 }
             }
             item(span = { GridItemSpan(2) }, key = "actions") {
+                // A grid item lays its children out in a Box: without this Column the tiles and the
+                // Shuffle row were drawn on top of each other.
+                Column {
                 // Online build: everything that's yours, streamed or not, one tap away. Inside this
                 // item so the A-Z scroller's item count (HEADER_ITEMS) stays the same.
                 if (vm.onlineName != null) Column {
                     com.skarif.kairos.ui.components.HintCard(
                         "library", "Everything that's yours",
                         listOf(
-                            "The four tiles hold your favourites, playlists, downloads and what you played lately, streamed or not.",
+                            "The tiles hold your favourites, playlists, downloads, what you played lately, and the artists and albums you liked online.",
                             "Songs, Albums, Artists and Genres below are the music files on this phone, including songs you saved to the phone.",
                         ),
                         Modifier.padding(top = 18.dp),
@@ -271,6 +274,7 @@ fun LibraryScreen(
                         Pill(settings.songSort.label, onSort, icon = Ic.Sort)
                     }
                     Spacer(Modifier.weight(1f))
+                }
                 }
             }
             // Mood by colour: shuffle songs whose cover is mostly this colour.
@@ -482,9 +486,13 @@ private fun YoursTiles(vm: MainViewModel, onOpenCollection: (String) -> Unit, on
     val downloads by vm.onlineUi.downloadedIds.collectAsStateWithLifecycle()
     val mixes by vm.mixes.collectAsStateWithLifecycle()
     val recent = mixes.firstOrNull { it.key == "lastplayed" }?.songs?.size ?: 0
+    val artists by vm.onlineUi.likedArtists.collectAsStateWithLifecycle()
+    val albums by vm.onlineUi.likedCollections.collectAsStateWithLifecycle()
     val tiles = listOf(
         Triple(Ic.HeartFilled, "Favourites", "${favs.size} songs") to { onOpenCollection("favourites") },
         Triple(Ic.Queue, "Playlists", "${playlists.size}") to onPlaylists,
+        Triple(Ic.Person, "Artists", "${artists.size} liked") to { onOpenCollection("online:artists") },
+        Triple(Ic.Disc, "Albums", "${albums.size} liked") to { onOpenCollection("online:albums") },
         Triple(Ic.DownArrow, "Downloads", "${downloads.size} songs") to onDownloads,
         Triple(Ic.Clock, "Recently played", "$recent songs") to { onOpenCollection("lastplayed") },
     )

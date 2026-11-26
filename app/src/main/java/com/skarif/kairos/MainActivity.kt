@@ -166,7 +166,10 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
         ) { granted -> if (!granted) vm.notify("Saving to the phone needs storage access") }
         if (vm.onlineName != null) com.skarif.kairos.ui.screens.UpdateDialog(vm)
         LaunchedEffect(Unit) { vm.onlineUi.askStorage.collect { askStorage.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) } }
-        fun openCollection(key: String) = nav.navigate("collection/" + Uri.encode(key))
+        fun openCollection(key: String) =
+            // Online build: liked artists / albums are online pages, not library collections.
+            if (key.startsWith("online:")) nav.navigate("online/liked/" + key.removePrefix("online:"))
+            else nav.navigate("collection/" + Uri.encode(key))
         fun openAlbum(id: Long) = openCollection("album:$id")
         val openMenu = { menuOpen = true }
         val openScope = androidx.compose.runtime.rememberCoroutineScope()
@@ -325,6 +328,9 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                 screen("stats") { StatsScreen(vm, onMenu = openMenu, onSettings = { nav.navigate("settings") }) }
                 screen("search") {
                     SearchScreen(vm, onMenu = openMenu, onOpenCollection = ::openCollection, onOpenNowPlaying = openPlayer)
+                }
+                screen("online/liked/{kind}") { e ->
+                    com.skarif.kairos.ui.screens.LikedOnlineScreen(vm, artists = e.arguments?.getString("kind") == "artists", onBack = { nav.popBackStack() })
                 }
                 screen("downloads") { com.skarif.kairos.ui.screens.DownloadsScreen(vm, onBack = { nav.popBackStack() }, onOpenNowPlaying = openPlayer) }
                 screen("online/collection/{id}") { e ->
