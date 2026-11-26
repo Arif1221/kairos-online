@@ -34,4 +34,9 @@ internal object NewPipeDownloader : Downloader() {
             return Response(r.code, r.message, r.headers.toMultimap(), r.body?.string(), r.request.url.toString())
         }
     }
+
+    /** HTTP status of the first bytes of [url]; tells "blocked here" apart from "plays". */
+    fun probe(url: String): Int =
+        client.newCall(okhttp3.Request.Builder().url(url).header("User-Agent", USER_AGENT).header("Range", "bytes=0-1023").build())
+            .execute().use { it.code }
 }

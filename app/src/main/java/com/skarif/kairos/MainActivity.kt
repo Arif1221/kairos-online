@@ -23,6 +23,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +39,8 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,13 +60,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.skarif.kairos.online.Flavor
 import com.skarif.kairos.ui.MainViewModel
 import com.skarif.kairos.ui.components.CircleButton
 import com.skarif.kairos.ui.components.Ic
 import com.skarif.kairos.ui.components.ProvideNavScope
 import com.skarif.kairos.ui.screens.CollectionScreen
-import com.skarif.kairos.ui.screens.DiscoverScreen
 import com.skarif.kairos.ui.screens.FoldersScreen
 import com.skarif.kairos.ui.screens.HomeScreen
 import com.skarif.kairos.ui.screens.LibraryScreen
@@ -105,17 +106,21 @@ class MainActivity : ComponentActivity() {
         // A first run (or a restore without the music permission) starts on the welcome screen.
         // Read the stored flag before the first frame so a returning user never sees it flash.
         val onboarded = runBlocking { (application as PlayerApp).container.settings.load().onboarded }
-        // Online build: streaming needs no permission, so a user who skipped the library starts on Discover.
         val start = when {
             onboarded && hasAudioPermission(this) -> "home"
-            onboarded && Flavor.online != null -> "discover"
+            // Online build: streaming needs no permission, so someone who skipped the library starts on Explore.
+            onboarded && com.skarif.kairos.online.Flavor.online != null -> "discover"
             else -> "onboarding"
         }
         setContent { PlayerRoot(start) }
+        com.skarif.kairos.perf.PerfLog.install(window)
     }
+
+    override fun onResume() { super.onResume(); com.skarif.kairos.perf.PerfLog.setTracking(true) }
+    override fun onPause() { super.onPause(); com.skarif.kairos.perf.PerfLog.setTracking(false) }
 }
 
-private val TABS = listOf("home", "library", "stats", "search", "discover")
+private val TABS = Motion.TABS
 
 /** Screens whose top edge is dark in every theme. */
 private val DARK_TOP = setOf("collection/{key}")
@@ -123,16 +128,27 @@ private val DARK_TOP = setOf("collection/{key}")
 /** Bottom sheets opened over whatever is showing, including the player. */
 private enum class Tool { SLEEP, EQ, SORT }
 
-private val tabEnter: AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition = {
-    fadeIn(Motion.fadeIn()) + scaleIn(tween(Motion.PAGE_MS, easing = Motion.Emphasized), initialScale = 0.97f)
-}
-private val tabExit: AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition = { fadeOut(Motion.fadeOut()) }
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
     val settings by vm.settings.collectAsStateWithLifecycle()
-    val album by vm.albumColors.collectAsStateWithLifecycle()
+    val albumNow by vm.albumColors.collectAsStateWithLifecycle()
+    // A new song's colours recolour the whole app, which is a big redraw. Applying them the moment
+    // you tap a song landed on the player's first opening frames; a short delay lets it open first.
+    var album by remember { mutableStateOf(albumNow) }
+    LaunchedEffect(albumNow) {
+        if (album != null && albumNow != null) {
+            // Wait until the player has finished opening, not a fixed time that could land mid-animation.
+            kotlinx.coroutines.delay(120)
+            androidx.compose.runtime.snapshotFlow { com.skarif.kairos.ui.motion.PlayerMotion.animating }.first { !it }
+            kotlinx.coroutines.delay(120)
+        }
+        com.skarif.kairos.perf.PerfLog.state("theme", "recolouring")
+        album = albumNow
+        kotlinx.coroutines.delay(400)
+        com.skarif.kairos.perf.PerfLog.state("theme", null)
+    }
     PlayerTheme(settings, album) {
         val context = LocalContext.current
         val nav = rememberNavController()
@@ -140,17 +156,39 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
         val player = remember { PlayerController(scope) }
         var menuOpen by remember { mutableStateOf(false) }
         var tool by remember { mutableStateOf<Tool?>(null) }
+        val sheetDepth = androidx.compose.animation.core.animateFloatAsState(if (tool != null) 1f else 0f, Motion.sheet(), label = "sheetDepth")
         val song by vm.currentSong.collectAsStateWithLifecycle()
         // MediaStore may have changed since last time; a rescan is cheap.
         LaunchedEffect(Unit) { if (hasAudioPermission(context)) vm.scanNow() }
         fun openCollection(key: String) = nav.navigate("collection/" + Uri.encode(key))
         fun openAlbum(id: Long) = openCollection("album:$id")
         val openMenu = { menuOpen = true }
-        val openPlayer = { player.expand() }
+        val openScope = androidx.compose.runtime.rememberCoroutineScope()
+        // Open only once there is a song to show: the very first play used to start the opening
+        // animation before the player existed, so it popped in halfway through.
+        val openPlayer: () -> Unit = {
+            openScope.launch {
+                // Wait briefly for a song that's just been started; with none, don't open. Opening
+                // with no song once left the player "open" but not on screen, and the app behind it
+                // stops drawing while the player covers it: a black screen.
+                val s = kotlinx.coroutines.withTimeoutOrNull(1500) { vm.currentSong.first { it != null } }
+                if (s != null) player.expand() else vm.notify("Play a song first")
+            }
+        }
 
         val entry by nav.currentBackStackEntryAsState()
         val route = entry?.destination?.route
+        LaunchedEffect(route) { com.skarif.kairos.perf.PerfLog.state("screen", route) }
         val playerUp by remember { derivedStateOf { player.progress.value > 0.5f } }
+        // The player exists only with a song, and not during onboarding.
+        val playerShown = route != null && route != "onboarding" && song != null
+        // Safety net: never leave the player "open" with nothing on screen to show it.
+        // Whatever asks for it (the dock, the menu's Now playing or Queue), while there's no player to
+        // show, any opening is undone at once.
+        LaunchedEffect(playerShown) {
+            if (playerShown) return@LaunchedEffect
+            androidx.compose.runtime.snapshotFlow { player.progress.value }.collect { if (it > 0f) player.progress.snapTo(0f) }
+        }
 
         // Bar icons must contrast with what is behind them: the player's cover is dark at the top,
         // album pages too; everything else follows the theme.
@@ -170,8 +208,8 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
         // Shown once after a crash, so the report can be copied and sent.
         var crash by remember { mutableStateOf(java.io.File(context.filesDir, PlayerApp.CRASH_FILE).takeIf { it.exists() }?.readText()) }
         crash?.let { text ->
-            val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
-            androidx.compose.material3.AlertDialog(
+            val clipboard = androidx.compose.ui.platform.LocalClipboard.current
+            com.skarif.kairos.ui.components.KairosDialog(
                 onDismissRequest = { java.io.File(context.filesDir, PlayerApp.CRASH_FILE).delete(); crash = null },
                 containerColor = P.colors.sheet,
                 title = { Text("Kairos stopped last time", color = P.colors.text) },
@@ -184,7 +222,7 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                 },
                 confirmButton = {
                     androidx.compose.material3.TextButton({
-                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
+                        scope.launch { clipboard.setClipEntry(androidx.compose.ui.platform.ClipEntry(android.content.ClipData.newPlainText("Kairos crash", text))) }
                         java.io.File(context.filesDir, PlayerApp.CRASH_FILE).delete(); crash = null
                     }) { Text("Copy report", color = P.colors.text) }
                 },
@@ -194,46 +232,99 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
             )
         }
 
-        CompositionLocalProvider(LocalPlayer provides player, com.skarif.kairos.ui.components.LocalBackdrop provides true) {
-        Box(Modifier.fillMaxSize()) {
-            // One shared background behind every page: pages slide over it instead of each
-            // drawing (and blurring) its own copy, which is what made transitions heavy.
-            val backArt by vm.artwork.collectAsStateWithLifecycle()
-            com.skarif.kairos.ui.components.Backdrop(backArt, settings.blurBackground)
+        // Every list gets the iOS rubber band instead of Android's stretch (ui/motion/Scroll.kt).
+        var collectionMenu by remember { mutableStateOf<String?>(null) }
+        val backArt by vm.artwork.collectAsStateWithLifecycle()
+        val backPlaying by vm.isPlaying.collectAsStateWithLifecycle()
+        val backdrop = com.skarif.kairos.ui.components.rememberBackdrop(backArt, settings.blurBackground, backPlaying)
+        val onlineNav = remember(nav) {
+                com.skarif.kairos.ui.screens.OnlineNav(
+                    search = { q, kind ->
+                        vm.onlineUi.setSearchOnline(true)
+                        vm.onlineUi.setKind(kind)
+                        vm.setQuery(q)
+                        player.collapse()
+                        nav.tab("search")
+                    },
+                    collection = { id -> player.collapse(); nav.navigate("online/collection/${Uri.encode(id)}") },
+                    artist = { id, name -> player.collapse(); nav.navigate("online/artist/${Uri.encode(id)}?name=${Uri.encode(name)}") },
+                )
+            }
+        CompositionLocalProvider(
+            LocalPlayer provides player, com.skarif.kairos.ui.components.LocalBackdrop provides backdrop,
+            // Mini player: 12 dp above the nav bar, 64 dp tall, plus a little air above it.
+            com.skarif.kairos.ui.screens.LocalBottomClearance provides (if (song != null) 96.dp else 0.dp),
+            // One long-press menu for every album, artist, genre, playlist and mix tile.
+            com.skarif.kairos.ui.screens.LocalCollectionMenu provides { k -> collectionMenu = k },
+            com.skarif.kairos.ui.screens.LocalOnlineNav provides onlineNav,
+            androidx.compose.foundation.LocalOverscrollFactory provides com.skarif.kairos.ui.motion.IosOverscrollFactory,
+        ) {
+        // Black behind everything: what shows around the app when it sinks back behind the player.
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
             NavHost(
                 nav, startDestination = start,
-                // Push: the new page slides in from the right, the old one drifts left and fades.
-                // Pop is the mirror image. Translation only, so it stays smooth on long lists.
-                enterTransition = { slideInHorizontally(tween(Motion.PAGE_MS, easing = Motion.Emphasized)) { it / 5 } + fadeIn(tween(260, easing = Motion.EmphasizedDecelerate)) },
-                exitTransition = { slideOutHorizontally(tween(Motion.PAGE_MS, easing = Motion.Emphasized)) { -it / 10 } + fadeOut(tween(200)) },
-                popEnterTransition = { slideInHorizontally(tween(Motion.PAGE_MS, easing = Motion.Emphasized)) { -it / 10 } + fadeIn(tween(260, easing = Motion.EmphasizedDecelerate)) },
-                popExitTransition = { slideOutHorizontally(tween(320, easing = Motion.EmphasizedAccelerate)) { it / 5 } + fadeOut(tween(200)) },
+                // iOS sheet depth: as the player (or a sheet) comes up, the app behind sinks back,
+                // rounds its corners and darkens. Darkening is drawn as a scrim, not alpha: alpha
+                // on a full-screen layer forces an extra full-screen pass every frame. Once the
+                // player covers it completely, the app isn't drawn at all.
+                modifier = Modifier
+                    .graphicsLayer {
+                        val p = maxOf(player.progress.value.coerceIn(0f, 1f), sheetDepth.value * 0.6f)
+                        // Skip drawing the app only while the player really covers it.
+                        if (p >= 0.999f && playerShown) { alpha = 0f; return@graphicsLayer }
+                        if (p > 0f) {
+                            val sc = 1f - 0.06f * p
+                            scaleX = sc; scaleY = sc
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape((24f * p).dp)
+                            clip = true
+                        }
+                    }
+                    .drawWithContent {
+                        drawContent()
+                        val p = maxOf(player.progress.value.coerceIn(0f, 1f), sheetDepth.value * 0.6f)
+                        if (p > 0f) drawRect(Color.Black, alpha = 0.4f * p)
+                    },
+                enterTransition = Motion.enter,
+                exitTransition = Motion.exit,
+                popEnterTransition = Motion.popEnter,
+                popExitTransition = Motion.popExit,
+                // The back *gesture* has its own pair (Navigation 2.10); left unset it falls back to
+                // Material's shrink-into-a-card. Use the same iOS slide, following the thumb.
+                predictivePopEnterTransition = { _ -> Motion.popEnter(this) },
+                predictivePopExitTransition = { _ -> Motion.popExit(this) },
             ) {
                 screen("onboarding") {
                     OnboardingScreen(vm) {
-                        val next = if (hasAudioPermission(context) || Flavor.online == null) "home" else "discover"
+                        val next = if (hasAudioPermission(context) || vm.onlineName == null) "home" else "discover"
                         nav.navigate(next) { popUpTo("onboarding") { inclusive = true } }
                     }
                 }
-                screen("home", enterTransition = tabEnter, exitTransition = tabExit) {
+                screen("home") {
                     HomeScreen(
                         vm, onMenu = openMenu, onSearch = { nav.tab("search") }, onOpenCollection = ::openCollection,
                         onOpenNowPlaying = openPlayer, onPlaylists = { nav.navigate("playlists") },
                         onLibrary = { nav.tab("library") },
                     )
                 }
-                screen("library", enterTransition = tabEnter, exitTransition = tabExit) {
+                screen("library") {
                     LibraryScreen(
                         vm, onOpenNowPlaying = openPlayer, onSettings = { nav.navigate("settings") },
                         onFolders = { nav.navigate("folders") }, onSort = { tool = Tool.SORT }, onOpenAlbum = ::openAlbum, onOpenCollection = ::openCollection,
                     )
                 }
-                screen("stats", enterTransition = tabEnter, exitTransition = tabExit) { StatsScreen(vm, onMenu = openMenu, onSettings = { nav.navigate("settings") }) }
-                screen("search", enterTransition = tabEnter, exitTransition = tabExit) {
+                screen("stats") { StatsScreen(vm, onMenu = openMenu, onSettings = { nav.navigate("settings") }) }
+                screen("search") {
                     SearchScreen(vm, onMenu = openMenu, onOpenCollection = ::openCollection, onOpenNowPlaying = openPlayer)
                 }
-                screen("discover", enterTransition = tabEnter, exitTransition = tabExit) {
-                    DiscoverScreen(vm, onMenu = openMenu, onOpenNowPlaying = openPlayer)
+                screen("discover") { com.skarif.kairos.ui.screens.ExploreScreen(vm, onMenu = openMenu, onOpenNowPlaying = openPlayer) }
+                screen("online/collection/{id}") { e ->
+                    val id = Uri.decode(e.arguments?.getString("id") ?: "")
+                    com.skarif.kairos.ui.screens.OnlineCollectionScreen(vm, id, onBack = { nav.popBackStack() }, onOpenNowPlaying = openPlayer)
+                }
+                screen("online/artist/{id}?name={name}") { e ->
+                    val id = Uri.decode(e.arguments?.getString("id") ?: "")
+                    val name = Uri.decode(e.arguments?.getString("name") ?: "")
+                    com.skarif.kairos.ui.screens.OnlineArtistScreen(vm, id, name, onBack = { nav.popBackStack() }, onOpenNowPlaying = openPlayer)
                 }
                 screen("playlists") {
                     PlaylistsScreen(vm, onBack = { nav.popBackStack() }, onNew = { nav.navigate("newplaylist?fromQueue=false") }, onOpenCollection = ::openCollection)
@@ -245,7 +336,7 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                 }
                 screen("collection/{key}") { e ->
                     val key = Uri.decode(e.arguments?.getString("key") ?: "")
-                    CollectionScreen(vm, key, onBack = { nav.popBackStack() }, onOpenNowPlaying = openPlayer, onOpenAlbum = ::openAlbum)
+                    CollectionScreen(vm, key, onBack = { nav.popBackStack() }, onOpenNowPlaying = openPlayer, onOpenAlbum = ::openAlbum, onOpenCollection = ::openCollection)
                 }
                 screen("settings") {
                     SettingsScreen(vm, onBack = { nav.popBackStack() }, onFolders = { nav.navigate("folders") }, onEqualizer = { tool = Tool.EQ })
@@ -254,7 +345,7 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
             }
 
             // Where the mini player rests: above the dock on tabs, near the bottom edge elsewhere.
-            val showPlayer = route != null && route != "onboarding" && song != null
+            val showPlayer = playerShown
             val density = androidx.compose.ui.platform.LocalDensity.current
             val navBar = androidx.compose.foundation.layout.WindowInsets.navigationBars.getBottom(density).toFloat()
             val targetBottom = navBar + with(density) { (if (route in TABS) 12.dp + 76.dp + 10.dp else 12.dp).toPx() }
@@ -315,7 +406,7 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     if (song != null) Spacer(Modifier.height(74.dp)) // room for the mini player
-                    Dock(route = route, online = vm.onlineName != null, onTab = { nav.tab(it) }, onNow = openPlayer)
+                    Dock(route = route, online = vm.onlineName != null, onTab = { if (it == route) vm.reselectTab(it) else nav.tab(it) }, onNow = openPlayer)
                 }
             }
 
@@ -323,19 +414,33 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
             if (showPlayer) {
                 PlayerSheet(
                     vm, player, miniBottom,
-                    onAlbum = ::openAlbum,
+                    onAlbum = { id -> if (song?.volume != com.skarif.kairos.data.db.ONLINE_VOLUME) openAlbum(id) },
+                    onOpenCollection = { key ->
+                        // An online song's artist isn't in the library: look them up online instead.
+                        if (song?.volume == com.skarif.kairos.data.db.ONLINE_VOLUME && key.startsWith("artist:") &&
+                            vm.artistByKey.value[com.skarif.kairos.data.normalize(key.removePrefix("artist:"))] == null
+                        ) onlineNav.search(key.removePrefix("artist:"), com.skarif.kairos.online.OnlineKind.ARTISTS)
+                        else openCollection(key)
+                    },
                     onSleep = { tool = Tool.SLEEP },
                     onEqualizer = { tool = Tool.EQ },
                     onSaveQueue = { nav.navigate("newplaylist?fromQueue=true") },
                 )
             }
 
+            // "Removed from queue — Undo" and other short messages, above the mini player and dock.
+            com.skarif.kairos.ui.screens.NoticeBar(
+                vm,
+                Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
+                    .padding(bottom = when { playerUp -> 24.dp; song != null && route in TABS -> 170.dp; song != null -> 96.dp; route in TABS -> 96.dp; else -> 24.dp }),
+            )
+
             AnimatedVisibility(menuOpen, enter = fadeIn(Motion.fadeIn()) + slideInHorizontally(Motion.spatial()) { -it / 3 }, exit = fadeOut(Motion.fadeOut()) + slideOutHorizontally(Motion.spatial()) { -it / 3 }) {
                 MenuDrawer(vm, onClose = { menuOpen = false }) { r ->
                     menuOpen = false
                     when (r) {
-                        "now" -> player.expand()
-                        "queue" -> player.expand(PlayerPage.QUEUE)
+                        "now" -> if (song != null) player.expand() else vm.notify("Play a song first")
+                        "queue" -> if (song != null) player.expand(PlayerPage.QUEUE) else vm.notify("Play a song first")
                         "eq" -> tool = Tool.EQ
                         "sleep" -> tool = Tool.SLEEP
                         in TABS -> nav.tab(r)
@@ -346,30 +451,48 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
             }
             BackHandler(enabled = menuOpen) { menuOpen = false }
 
+            collectionMenu?.let { k ->
+                com.skarif.kairos.ui.screens.CollectionActionsSheet(vm, k, ::openCollection, onDismiss = { collectionMenu = null })
+            }
+
             when (tool) {
                 Tool.SLEEP -> SleepTimerSheet(vm, onBack = { tool = null })
                 Tool.EQ -> EqualizerSheet(vm, onBack = { tool = null })
                 Tool.SORT -> SortSheet(vm, onBack = { tool = null })
                 null -> Unit
             }
+
+            // Edge glow: the album's colour arriving with each new song, and a lighter one at the
+            // "Kairos moment" (the chorus first hitting). Over everything, draw-only.
+            val glow = com.skarif.kairos.ui.components.rememberEdgeGlow(scope)
+            val glowSong = song?.id
+            var seenFirst by remember { mutableStateOf(false) }
+            LaunchedEffect(glowSong) {
+                if (glowSong == null) return@LaunchedEffect
+                if (seenFirst) glow.flash(1f) else seenFirst = true // not on app start
+            }
+            val chorus by vm.chorusMs.collectAsStateWithLifecycle()
+            val momentHaptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+            val momentLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+            LaunchedEffect(glowSong, chorus) {
+                val at = chorus ?: return@LaunchedEffect
+                // Once per song: when playback crosses the chorus (not when you seek far past it).
+                vm.position.first { p -> vm.isPlaying.value && p in at..(at + 1_500) }
+                // Only when you can see it: no glow queued up or buzz in a pocket.
+                if (momentLifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+                    glow.moment()
+                    momentHaptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                }
+            }
+            com.skarif.kairos.ui.components.EdgeGlowOverlay(glow, P.colors.accent)
         }
         }
     }
 }
 
 /** A NavHost destination that also tells shared-card transitions which animation it is in. */
-private fun NavGraphBuilder.screen(
-    route: String,
-    enterTransition: (AnimatedContentTransitionScope<NavBackStackEntry>.() -> EnterTransition?)? = null,
-    exitTransition: (AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition?)? = null,
-    popExitTransition: (AnimatedContentTransitionScope<NavBackStackEntry>.() -> ExitTransition?)? = exitTransition,
-    content: @Composable (NavBackStackEntry) -> Unit,
-) = composable(
-    route,
-    enterTransition = enterTransition,
-    exitTransition = exitTransition,
-    popExitTransition = popExitTransition,
-) { entry -> ProvideNavScope(this) { content(entry) } }
+private fun NavGraphBuilder.screen(route: String, content: @Composable (NavBackStackEntry) -> Unit) =
+    composable(route) { entry -> ProvideNavScope(this) { content(entry) } }
 
 /** Tab-style navigation: one copy of each tab, Home at the bottom of the stack. */
 private fun NavHostController.tab(route: String) = navigate(route) {
@@ -399,8 +522,8 @@ private fun Dock(route: String?, online: Boolean, onTab: (String) -> Unit, onNow
             )
         }
         tab("home", Ic.Home, "Home")
-        // Online build: Discover takes Stats' place (Stats stays in the menu); six buttons don't fit narrow phones.
-        if (online) tab("discover", Ic.Discover, "Discover") else tab("library", Ic.Library, "Library")
+        // Online build: Explore takes Library's place and Library takes Stats' (Stats stays in the menu).
+        if (online) tab("discover", Ic.Discover, "Explore") else tab("library", Ic.Library, "Library")
         CircleButton(Ic.Play, "Now playing", onNow, size = 60.dp, container = c.accent, content = c.onAccent, iconSize = 22.dp)
         if (online) tab("library", Ic.Library, "Library") else tab("stats", Ic.Stats, "Statistics")
         tab("search", Ic.Search, "Search")

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -62,6 +63,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.skarif.kairos.data.SongSort
+import com.skarif.kairos.ui.motion.Motion
+import com.skarif.kairos.ui.components.headerPanel
+import com.skarif.kairos.ui.components.stretchTitle
+import com.skarif.kairos.data.matchesQuery
 import com.skarif.kairos.data.db.SongEntity
 import com.skarif.kairos.ui.MainViewModel
 import com.skarif.kairos.ui.ScanState
@@ -75,19 +80,22 @@ import com.skarif.kairos.ui.theme.T
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
 
+private class LetterRun(val letter: Char?, val start: Int, val songs: List<SongEntity>)
+
 private enum class LibTab(val label: String) { SONGS("Songs"), ALBUMS("Albums"), ARTISTS("Artists"), GENRES("Genres") }
 
 /** Items above the first song/album/artist in the grid. */
 private const val HEADER_ITEMS = 2
 
-private fun letterOf(s: SongEntity, sort: SongSort): Char {
-    val text = when (sort) {
+private fun letterOf(s: SongEntity, sort: SongSort, ignoreArticles: Boolean = false, keys: Map<String, String> = emptyMap()): Char {
+    val raw = when (sort) {
         SongSort.ARTIST -> s.artist
         SongSort.ALBUM -> s.album
         else -> s.title
     }
-    val ch = text.trimStart('(', '[', '\'', '"', '.', ' ').firstOrNull()?.uppercaseChar() ?: '#'
-    return if (ch in 'A'..'Z') ch else '#'
+    // Reuse the key the ViewModel already worked out off the main thread ("0…" = #, "1x…" = X).
+    val k = keys[raw] ?: return com.skarif.kairos.data.libraryLetter(raw, ignoreArticles)
+    return if (k.startsWith("0") || k.length < 2) '#' else k[1].uppercaseChar().takeIf { it in 'A'..'Z' } ?: '#'
 }
 
 /**
@@ -106,23 +114,37 @@ fun LibraryScreen(
     onOpenCollection: (String) -> Unit,
 ) {
     val c = P.colors
+    val menu = LocalCollectionMenu.current
     val songs by vm.sortedSongs.collectAsStateWithLifecycle()
     val now by vm.now.collectAsStateWithLifecycle()
     val art by vm.artwork.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val scan by vm.scan.collectAsStateWithLifecycle()
+    // Collected once here, not once per row.
+    val favs by vm.favorites.collectAsStateWithLifecycle()
+    val sortKeys by vm.sortKeys.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(LibTab.SONGS) }
     var actionsFor by remember { mutableStateOf<SongEntity?>(null) }
     val grid = rememberLazyGridState()
     val scope = rememberCoroutineScope()
     val fmt = remember { NumberFormat.getIntegerInstance() }
 
-    val albums = remember(songs) {
-        songs.groupBy { it.albumId }.values.map { it.first() }.sortedBy { it.album.lowercase() }
-    }
-    val artists by vm.artists.collectAsStateWithLifecycle()
-    val genres by vm.genres.collectAsStateWithLifecycle()
-    val count = when (tab) { LibTab.SONGS -> songs.size; LibTab.ALBUMS -> albums.size; LibTab.ARTISTS -> artists.size; LibTab.GENRES -> genres.size }
+    var filter by rememberSaveable { mutableStateOf("") }
+    val allAlbums by vm.albums.collectAsStateWithLifecycle()
+    val allArtists by vm.artists.collectAsStateWithLifecycle()
+    val allGenres by vm.genres.collectAsStateWithLifecycle()
+    val allSongs = songs
+    // The filter box filters whichever tab is open; every word must match, accents ignored.
+    // Matching runs in the ViewModel off the main thread, on a pre-built index, after a short pause.
+    val hits by vm.libraryHits.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(filter) { vm.setLibraryFilter(filter) }
+    val h = hits?.takeIf { filter.isNotBlank() }
+    androidx.compose.runtime.LaunchedEffect(h) { if (h != null && grid.firstVisibleItemIndex > 1) grid.scrollToItem(1) }
+    val shownSongs = remember(allSongs, h) { h?.let { x -> allSongs.filter { it.id in x.songs } } ?: allSongs }
+    val albums = remember(allAlbums, h) { h?.let { x -> allAlbums.filter { it.id in x.albums } } ?: allAlbums }
+    val artists = remember(allArtists, h) { h?.let { x -> allArtists.filter { it.name in x.artists } } ?: allArtists }
+    val genres = remember(allGenres, h) { h?.let { x -> allGenres.filter { it.name in x.genres } } ?: allGenres }
+    val count = when (tab) { LibTab.SONGS -> shownSongs.size; LibTab.ALBUMS -> albums.size; LibTab.ARTISTS -> artists.size; LibTab.GENRES -> genres.size }
     val noun = when (tab) { LibTab.SONGS -> "songs"; LibTab.ALBUMS -> "albums"; LibTab.ARTISTS -> "artists"; LibTab.GENRES -> "genres" }
     val summary = remember(songs) {
         val gb = songs.sumOf { it.sizeBytes } / 1_000_000_000.0
@@ -131,37 +153,58 @@ fun LibraryScreen(
     }
     val collapsed by remember { derivedStateOf { grid.firstVisibleItemIndex > 0 } }
     val letterSorted = settings.songSort in setOf(SongSort.TITLE, SongSort.ARTIST, SongSort.ALBUM)
-    val letters = remember(songs, settings.songSort) {
-        if (!letterSorted) emptyList()
-        // A-Z order with # first, each pointing at its first song, whatever the list's quirks.
-        else songs.mapIndexed { i, s -> letterOf(s, settings.songSort) to i }.distinctBy { it.first }
+    // Songs sorted by title/artist/album are shown in runs under a letter header ("A", "B", ...).
+    val runs = remember(shownSongs, settings.songSort, settings.ignoreArticles, filter, sortKeys) {
+        if (!letterSorted || filter.isNotBlank()) listOf(LetterRun(null, 0, shownSongs))
+        else {
+            val out = ArrayList<LetterRun>()
+            var start = 0
+            while (start < shownSongs.size) {
+                val l = letterOf(shownSongs[start], settings.songSort, settings.ignoreArticles, sortKeys)
+                var end = start + 1
+                while (end < shownSongs.size && letterOf(shownSongs[end], settings.songSort, settings.ignoreArticles, sortKeys) == l) end++
+                out += LetterRun(l, start, shownSongs.subList(start, end))
+                start = end
+            }
+            out
+        }
+    }
+    // A-Z order with # first, each pointing at the grid row of its first header.
+    val letters = remember(runs) {
+        var row = HEADER_ITEMS
+        runs.map { r -> val at = row; row += r.songs.size + (if (r.letter != null) 1 else 0); r.letter to at }
+            .mapNotNull { (l, at) -> l?.let { it to at } }.distinctBy { it.first }
             .sortedBy { if (it.first == '#') ' ' else it.first }
     }
 
     actionsFor?.let { s -> SongActionsDialog(vm, s, onOpenAlbum) { actionsFor = null } }
     // Header panel follows the theme: frosted light glass by day, dark glass by night.
-    val panel = if (c.dark) Color(0xE6121212) else c.card.copy(alpha = 0.92f)
-    val chip = if (c.dark) Color(0xFF2A2A2A) else c.bg
+    val panel = c.panel
+    val chip = c.chip
     val fg = c.text
     val soft = c.muted
 
-    ScreenBackground(art, settings.blurBackground) {
+    val band = com.skarif.kairos.ui.motion.rememberRubberBand()
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        vm.tabReselected.collect { if (it == "library") grid.animateScrollToItem(0) }
+    }
+
+    ScreenBackground {
         LazyVerticalGrid(
             GridCells.Fixed(2),
             Modifier.fillMaxSize(),
             state = grid,
+            flingBehavior = com.skarif.kairos.ui.motion.rememberIosFling(),
+            overscrollEffect = band,
             contentPadding = PaddingValues(bottom = 230.dp),
+            // Build rows a screen ahead while idle (pausable composition spreads it over frames).
+            cacheWindow = androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow(ahead = 480.dp, behind = 160.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(if (tab == LibTab.ALBUMS || tab == LibTab.GENRES) 10.dp else 0.dp),
         ) {
             item(span = { GridItemSpan(2) }, key = "header") {
                 Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(bottomStart = 40.dp, bottomEnd = 40.dp))
-                        .background(panel)
-                        .statusBarsPadding()
-                        .padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 18.dp),
+                    Modifier.headerPanel { band.pull },
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -172,7 +215,7 @@ fun LibraryScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("Your collection", color = soft, style = T.body)
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("${fmt.format(count)} $noun", Modifier.weight(1f), color = fg, style = T.big)
+                            Text("${fmt.format(count)} $noun", Modifier.weight(1f).stretchTitle { band.pull }, color = fg, style = T.big)
                             CircleButton(Ic.Refresh, "Scan again", vm::scanNow, size = 44.dp, container = Color.Transparent, content = fg)
                         }
                         Text(
@@ -180,8 +223,9 @@ fun LibraryScreen(
                             color = soft, style = T.small,
                         )
                     }
+                    SearchField(filter, { filter = it }, "Filter ${tab.label.lowercase()}", container = chip, height = 52.dp)
                     Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(chip).padding(4.dp),
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)).background(chip).padding(4.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         LibTab.entries.forEach { t ->
@@ -207,17 +251,38 @@ fun LibraryScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Pill("Shuffle", { vm.shuffle(songs); onOpenNowPlaying() }, accent = true, icon = Ic.Shuffle)
+                    Pill("Shuffle", { vm.shuffleAll(shownSongs); onOpenNowPlaying() }, accent = true, icon = Ic.Shuffle)
                     if (tab == LibTab.SONGS) {
                         Pill(settings.songSort.label, onSort, icon = Ic.Sort)
                     }
                     Spacer(Modifier.weight(1f))
                 }
             }
+            // Mood by colour: shuffle songs whose cover is mostly this colour.
+            if (tab == LibTab.SONGS) item(span = { GridItemSpan(2) }, key = "colours") {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("Play by colour", Modifier.weight(1f), style = T.small, color = c.muted)
+                    com.skarif.kairos.data.CoverColour.entries.forEach { col ->
+                        Box(
+                            Modifier.size(26.dp).clip(CircleShape).background(Color(col.swatch))
+                                .clickable(role = Role.Button, onClickLabel = "Shuffle ${col.label.lowercase()} covers") {
+                                    // The player stays closed: it may take a moment, or there may be too few.
+                                    vm.playByColour(col)
+                                },
+                        )
+                    }
+                }
+            }
 
             when (tab) {
                 LibTab.SONGS -> {
-                    if (songs.isEmpty()) {
+                    if (shownSongs.isEmpty() && filter.isNotBlank()) {
+                        item(span = { GridItemSpan(2) }) { Text("Nothing matches \"$filter\".", Modifier.padding(18.dp), style = T.body, color = c.muted) }
+                    } else if (shownSongs.isEmpty()) {
                         item(span = { GridItemSpan(2) }) {
                             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Text(
@@ -229,19 +294,30 @@ fun LibraryScreen(
                             }
                         }
                     }
-                    itemsIndexed(songs, key = { _, s -> s.id }, span = { _, _ -> GridItemSpan(2) }, contentType = { _, _ -> "song" }) { i, s ->
-                        Box(Modifier.padding(end = if (letters.isNotEmpty()) 22.dp else 0.dp)) {
-                            SongRow(s, playing = s.id == now.songId, vm, onLongClick = { actionsFor = s }) {
-                                vm.play(songs, i)
-                                onOpenNowPlaying()
+                    runs.forEach { run ->
+                        if (run.letter != null) {
+                            item(span = { GridItemSpan(2) }, key = "h${run.start}", contentType = "letter") {
+                                Text(
+                                    "${run.letter}", Modifier.padding(start = 22.dp, top = 14.dp, bottom = 4.dp),
+                                    style = T.title.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold), color = c.accent,
+                                )
+                            }
+                        }
+                        itemsIndexed(run.songs, key = { _, s -> s.id }, span = { _, _ -> GridItemSpan(2) }, contentType = { _, _ -> "song" }) { i, s ->
+                            // Rows glide into place when the filter or sort changes, instead of jumping.
+                            Box(Modifier.padding(end = if (letters.isNotEmpty()) 22.dp else 0.dp)) {
+                                SongRow(s, playing = s.id == now.songId, vm, favourite = s.id in favs, onLongClick = { actionsFor = s }) {
+                                    vm.play(shownSongs, run.start + i, "Your library")
+                                    onOpenNowPlaying()
+                                }
                             }
                         }
                     }
                 }
                 LibTab.ALBUMS -> {
-                    itemsIndexed(albums, key = { _, s -> "al" + s.albumId }, contentType = { _, _ -> "album" }) { i, s ->
-                        Box(Modifier.padding(start = if (i % 2 == 0) 18.dp else 0.dp, end = if (i % 2 == 1) 18.dp else 0.dp)) {
-                            CoverTile(vm, s, key = "album:${s.albumId}", kicker = s.artist, title = s.album) { onOpenCollection("album:${s.albumId}") }
+                    itemsIndexed(albums, key = { _, g -> "al" + g.id }, contentType = { _, _ -> "album" }) { i, g ->
+                        Box(Modifier.gridGutter(i)) {
+                            CoverTile(vm, g.songs.first(), key = "album:${g.id}", kicker = g.artist, title = g.title) { onOpenCollection("album:${g.id}") }
                         }
                     }
                 }
@@ -251,17 +327,17 @@ fun LibraryScreen(
                         val list = a.songs
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp)
-                                .cardClick("Open $name") { onOpenCollection("artist:$name") }
-                                .clip(RoundedCornerShape(24.dp)).padding(8.dp),
+                                .cardClick("Open $name", onLongClick = { menu("artist:$name") }) { onOpenCollection("artist:$name") }
+                                .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)).padding(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
                             SongArt(vm, list.first(), 52.dp, corner = 26.dp)
                             Column(Modifier.weight(1f)) {
                                 Text(name, style = T.title, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("${list.size} songs, ${list.distinctBy { it.albumId }.size} albums", style = T.small, color = c.muted)
+                                Text("${list.size} songs, ${a.albums} albums", style = T.small, color = c.muted)
                             }
-                            CircleButton(Ic.Play, "Play $name", { vm.play(list, 0); onOpenNowPlaying() }, size = 44.dp, container = c.card)
+                            CircleButton(Ic.Play, "Play $name", { vm.play(list, 0, name); onOpenNowPlaying() }, size = 44.dp, container = c.card)
                         }
                     }
                 }
@@ -275,7 +351,7 @@ fun LibraryScreen(
                         }
                     }
                     itemsIndexed(genres, key = { _, g -> "ge" + g.name.lowercase() }, contentType = { _, _ -> "genre" }) { i, g ->
-                        Box(Modifier.padding(start = if (i % 2 == 0) 18.dp else 0.dp, end = if (i % 2 == 1) 18.dp else 0.dp)) {
+                        Box(Modifier.gridGutter(i)) {
                             CoverTile(vm, g.songs.first(), key = "genre:${g.name}", kicker = "${g.songs.size} songs", title = g.name) {
                                 onOpenCollection("genre:${g.name}")
                             }
@@ -306,10 +382,10 @@ fun LibraryScreen(
             }
         }
 
-        if (tab == LibTab.SONGS && letters.size > 3 && songs.size > 40) {
+        if (tab == LibTab.SONGS && letters.size > 3 && shownSongs.size > 40) {
             FastScroller(
                 letters = letters.map { it.first },
-                onPick = { idx -> scope.launch { grid.scrollToItem(HEADER_ITEMS + letters[idx].second) } },
+                onPick = { idx -> scope.launch { grid.scrollToItem(letters[idx].second) } },
                 modifier = Modifier.align(Alignment.CenterEnd).padding(end = 2.dp, top = 120.dp, bottom = 200.dp),
             )
         }

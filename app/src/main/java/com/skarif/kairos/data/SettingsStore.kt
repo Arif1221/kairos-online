@@ -26,10 +26,11 @@ enum class ThemeMode { LIGHT, DARK, SYSTEM }
  */
 enum class OutputMode { STANDARD, HI_RES, BIT_PERFECT }
 enum class LyricsPreference { EMBEDDED, LRC_FILE }
+/** What to ask LRCLIB for: synced lyrics (plain if there are none), or plain text only. */
+enum class OnlineLyricsType { SYNCED, PLAIN }
 enum class ReplayGainMode { OFF, TRACK, ALBUM }
 /** Streaming quality for the online source. [kbps] is what YouTube typically serves at that tier. */
 enum class StreamQuality(val label: String, val kbps: Int) { LOW("Data saver", 50), NORMAL("Normal", 128), HIGH("High", 160) }
-
 enum class SongSort(val label: String) {
     TITLE("Title"), ARTIST("Artist"), ALBUM("Album"), DATE_ADDED("Date added"), LENGTH("Length"), MOST_PLAYED("Most played")
 }
@@ -45,6 +46,9 @@ data class Settings(
     val lyricsPreference: LyricsPreference = LyricsPreference.EMBEDDED,
     /** Folders the user granted through the system picker, used to find .lrc files. */
     val lrcFolderUris: Set<String> = emptySet(),
+    /** Look lyrics up on lrclib.net when the song has none (off by default: the app is offline otherwise). */
+    val fetchLyricsOnline: Boolean = false,
+    val onlineLyricsType: OnlineLyricsType = OnlineLyricsType.SYNCED,
     val outputMode: OutputMode = OutputMode.HI_RES,
     val replayGain: ReplayGainMode = ReplayGainMode.OFF,
     val excludedFolders: Set<String> = emptySet(),
@@ -57,6 +61,22 @@ data class Settings(
     val onboarded: Boolean = false,
     val songSort: SongSort = SongSort.TITLE,
     val sortDescending: Boolean = false,
+    /** Keep playing similar songs from your library when the queue runs out. */
+    val autoplay: Boolean = true,
+    /** Shuffle adds a suggestion from your library after every few songs. */
+    val smartShuffle: Boolean = false,
+    /** Song ids kept out of mixes, shuffle-all, Smart Shuffle and autoplay. */
+    val hiddenSongs: Set<String> = emptySet(),
+    /** "songId:untilEpochMs": hidden like [hiddenSongs] until that time. */
+    val snoozedSongs: Set<String> = emptySet(),
+    /** Song ids whose plays don't shape mixes and suggestions (Stats still count them). */
+    val tasteExcluded: Set<String> = emptySet(),
+    /** Bring back the last queue, song and position when the app starts. */
+    val resumeQueue: Boolean = true,
+    /** Keep the screen on while the lyrics page is open. */
+    val keepScreenOnLyrics: Boolean = true,
+    /** Sort "The Weeknd" under W and "A Day to Remember" under D. */
+    val ignoreArticles: Boolean = false,
     /** Online flavor only. */
     val streamQuality: StreamQuality = StreamQuality.HIGH,
     /** Online flavor only: use [StreamQuality.LOW] on metered (mobile) networks. */
@@ -82,6 +102,8 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
         val lrc = booleanPreferencesKey("lyrics_lrc")
         val lyricsPref = stringPreferencesKey("lyrics_pref")
         val lrcFolders = stringSetPreferencesKey("lrc_folders")
+        val fetchOnline = booleanPreferencesKey("lyrics_fetch_online")
+        val onlineType = stringPreferencesKey("lyrics_online_type")
         val output = stringPreferencesKey("output_mode")
         val replayGain = stringPreferencesKey("replay_gain")
         val excluded = stringSetPreferencesKey("excluded_folders")
@@ -93,6 +115,14 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
         val onboarded = booleanPreferencesKey("onboarded")
         val sort = stringPreferencesKey("song_sort")
         val sortDesc = booleanPreferencesKey("sort_desc")
+        val autoplay = booleanPreferencesKey("autoplay")
+        val smartShuffle = booleanPreferencesKey("smart_shuffle")
+        val hidden = stringSetPreferencesKey("hidden_songs")
+        val snoozed = stringSetPreferencesKey("snoozed_songs")
+        val tasteExcluded = stringSetPreferencesKey("taste_excluded")
+        val resumeQueue = booleanPreferencesKey("resume_queue")
+        val keepScreenOn = booleanPreferencesKey("keep_screen_on_lyrics")
+        val ignoreArticles = booleanPreferencesKey("ignore_articles")
         val streamQuality = stringPreferencesKey("stream_quality")
         val dataSaver = booleanPreferencesKey("data_saver_mobile")
         val videosFirst = booleanPreferencesKey("search_videos_first")
@@ -121,6 +151,8 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
             readLrcFiles = p[K.lrc] ?: d.readLrcFiles,
             lyricsPreference = enumOr(p[K.lyricsPref], d.lyricsPreference),
             lrcFolderUris = p[K.lrcFolders] ?: d.lrcFolderUris,
+            fetchLyricsOnline = p[K.fetchOnline] ?: d.fetchLyricsOnline,
+            onlineLyricsType = enumOr(p[K.onlineType], d.onlineLyricsType),
             outputMode = enumOr(p[K.output], d.outputMode),
             replayGain = enumOr(p[K.replayGain], d.replayGain),
             excludedFolders = p[K.excluded] ?: d.excludedFolders,
@@ -132,6 +164,14 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
             onboarded = p[K.onboarded] ?: d.onboarded,
             songSort = enumOr(p[K.sort], d.songSort),
             sortDescending = p[K.sortDesc] ?: d.sortDescending,
+            autoplay = p[K.autoplay] ?: d.autoplay,
+            smartShuffle = p[K.smartShuffle] ?: d.smartShuffle,
+            hiddenSongs = p[K.hidden] ?: d.hiddenSongs,
+            snoozedSongs = p[K.snoozed] ?: d.snoozedSongs,
+            tasteExcluded = p[K.tasteExcluded] ?: d.tasteExcluded,
+            resumeQueue = p[K.resumeQueue] ?: d.resumeQueue,
+            keepScreenOnLyrics = p[K.keepScreenOn] ?: d.keepScreenOnLyrics,
+            ignoreArticles = p[K.ignoreArticles] ?: d.ignoreArticles,
             streamQuality = enumOr(p[K.streamQuality], d.streamQuality),
             dataSaverOnMobile = p[K.dataSaver] ?: d.dataSaverOnMobile,
             searchVideosFirst = p[K.videosFirst] ?: d.searchVideosFirst,
@@ -148,6 +188,8 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
         p[K.lrc] = s.readLrcFiles
         p[K.lyricsPref] = s.lyricsPreference.name
         p[K.lrcFolders] = s.lrcFolderUris
+        p[K.fetchOnline] = s.fetchLyricsOnline
+        p[K.onlineType] = s.onlineLyricsType.name
         p[K.output] = s.outputMode.name
         p[K.replayGain] = s.replayGain.name
         p[K.excluded] = s.excludedFolders
@@ -159,6 +201,14 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
         p[K.onboarded] = s.onboarded
         p[K.sort] = s.songSort.name
         p[K.sortDesc] = s.sortDescending
+        p[K.autoplay] = s.autoplay
+        p[K.smartShuffle] = s.smartShuffle
+        p[K.hidden] = s.hiddenSongs
+        p[K.snoozed] = s.snoozedSongs
+        p[K.tasteExcluded] = s.tasteExcluded
+        p[K.resumeQueue] = s.resumeQueue
+        p[K.keepScreenOn] = s.keepScreenOnLyrics
+        p[K.ignoreArticles] = s.ignoreArticles
         p[K.streamQuality] = s.streamQuality.name
         p[K.dataSaver] = s.dataSaverOnMobile
         p[K.videosFirst] = s.searchVideosFirst

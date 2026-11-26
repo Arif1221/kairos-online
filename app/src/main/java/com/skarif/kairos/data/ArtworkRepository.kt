@@ -10,10 +10,8 @@ import android.util.Size
 import androidx.core.graphics.ColorUtils
 import androidx.palette.graphics.Palette
 import com.skarif.kairos.data.db.SongEntity
-import com.skarif.kairos.data.db.contentUri
 import com.skarif.kairos.data.db.isOnline
-import java.net.HttpURLConnection
-import java.net.URL
+import com.skarif.kairos.data.db.contentUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -54,9 +52,17 @@ class ArtworkRepository(private val context: Context) {
         bmp?.also { bitmaps.put(key, it) }
     }
 
-    /** Downloads a cover and crops it to a centred square, like local album art. */
+    /** Art at [url] (online albums, playlists, artists), cached like song art. */
+    fun peekUrl(url: String, sizePx: Int): Bitmap? = bitmaps.get("u$url@$sizePx")
+
+    suspend fun loadUrl(url: String, sizePx: Int): Bitmap? = withContext(Dispatchers.IO) {
+        val key = "u$url@$sizePx"
+        bitmaps.get(key) ?: runCatching { loadRemote(url, sizePx) }.getOrNull()?.also { bitmaps.put(key, it) }
+    }
+
+    /** Downloads a cover (online songs) and crops it to a centred square, like local album art. */
     private fun loadRemote(url: String, sizePx: Int): Bitmap? {
-        val conn = URL(url).openConnection() as HttpURLConnection
+        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
         val bytes = try {
             conn.connectTimeout = 10_000
             conn.readTimeout = 10_000

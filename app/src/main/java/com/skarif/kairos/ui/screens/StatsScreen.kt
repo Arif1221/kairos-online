@@ -17,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.width
@@ -34,6 +35,9 @@ import com.skarif.kairos.ui.components.CircleButton
 import com.skarif.kairos.ui.components.HatchedBars
 import com.skarif.kairos.ui.components.Ic
 import com.skarif.kairos.ui.components.ScreenBackground
+import com.skarif.kairos.ui.components.CompactTitleBar
+import com.skarif.kairos.ui.components.stretchTitle
+import kotlinx.coroutines.launch
 import com.skarif.kairos.ui.theme.P
 import com.skarif.kairos.ui.theme.T
 
@@ -56,29 +60,54 @@ fun StatsScreen(vm: MainViewModel, onMenu: () -> Unit, onSettings: () -> Unit) {
     val c = P.colors
     val st by vm.stats.collectAsStateWithLifecycle()
     val range by vm.statsRange.collectAsStateWithLifecycle()
+    var story by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    val rangeName = when (range) {
+        com.skarif.kairos.ui.StatsRange.WEEK -> "week"; com.skarif.kairos.ui.StatsRange.MONTH -> "month"
+        com.skarif.kairos.ui.StatsRange.YEAR -> "year"; com.skarif.kairos.ui.StatsRange.ALL -> "time with Kairos"
+    }
+    if (story) WrappedStory(vm, st, rangeName) { story = false }
     val sel by vm.selectedBar.collectAsStateWithLifecycle()
     val art by vm.artwork.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val recap by vm.recap.collectAsStateWithLifecycle()
     val selected = if (sel in st.bars.indices) sel else st.bars.indices.maxByOrNull { st.bars[it].listenedMs } ?: -1
     val max = (st.bars.maxOfOrNull { it.listenedMs } ?: 0L).coerceAtLeast(1L)
 
-    ScreenBackground(art, settings.blurBackground) {
+    val scroll = rememberScrollState()
+    val band = com.skarif.kairos.ui.motion.rememberRubberBand()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        vm.tabReselected.collect { if (it == "stats") scroll.animateScrollTo(0, com.skarif.kairos.ui.motion.Motion.sheet()) }
+    }
+    val pastTitle by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { scroll.value > with(density) { 140.dp.toPx() } } }
+
+    ScreenBackground {
         Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding()
-                .padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 230.dp),
+            Modifier.fillMaxSize()
+                .verticalScroll(scroll, overscrollEffect = band, flingBehavior = com.skarif.kairos.ui.motion.rememberIosFling())
+                .padding(bottom = 230.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CircleButton(Ic.Menu, "Menu", onMenu, container = c.ink, content = c.inkFg)
-                Text("Statistics", Modifier.weight(1f), style = T.title, color = c.text, textAlign = TextAlign.Center)
-                CircleButton(Ic.Settings, "Settings", onSettings)
+            com.skarif.kairos.ui.components.TabHeader(
+                "Statistics",
+                left = { chip -> CircleButton(Ic.Menu, "Menu", onMenu, container = chip, content = c.text) },
+                right = { chip -> CircleButton(Ic.Settings, "Settings", onSettings, container = chip, content = c.text) },
+                pull = { band.pull },
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(hoursText(st.totalMs) + " listened", Modifier.stretchTitle { band.pull }, style = T.big, color = c.text)
+                    Text(st.change, style = T.small, color = c.muted)
+                }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(hoursText(st.totalMs) + " listened", style = T.big, color = c.text)
-                Text(st.change, style = T.body, color = c.muted)
-            }
+            Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            // Wrapped, any time: the range below as a story you can swipe through and share.
+            if (st.plays > 0) com.skarif.kairos.ui.components.Pill(
+                "Play your $rangeName as a story", { story = true }, icon = Ic.Play, accent = true, big = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
             Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(32.dp)).background(c.accent).padding(14.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card)).background(c.accent).padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -101,15 +130,15 @@ fun StatsScreen(vm: MainViewModel, onMenu: () -> Unit, onSettings: () -> Unit) {
                     onSelect = vm::selectBar,
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 StatTile("Plays", "${st.plays}", Modifier.weight(1f))
                 StatTile("Different songs", "${st.uniqueSongs}", Modifier.weight(1f))
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 StatTile("Daily average", hoursText(st.avgPerDayMs), Modifier.weight(1f))
                 StatTile("Day streak", plural(st.streakDays, "day"), Modifier.weight(1f))
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 StatTile("Played to the end", "${st.completedPct}%", Modifier.weight(1f))
                 StatTile("Usually listening at", st.peakHour.ifEmpty { "–" }, Modifier.weight(1f))
             }
@@ -143,15 +172,60 @@ fun StatsScreen(vm: MainViewModel, onMenu: () -> Unit, onSettings: () -> Unit) {
                     }
                 }
             }
+            recap?.let { Box(Modifier) { RecapCard(vm, it) } }
             Text("Stats update while you listen.", style = T.small, color = c.muted)
+            }
         }
+        CompactTitleBar("Statistics", pastTitle) { scope.launch { scroll.animateScrollTo(0, com.skarif.kairos.ui.motion.Motion.sheet()) } }
+    }
+}
+
+/** Wrapped-style "your year in music", from your own listening on this phone. */
+@Composable
+private fun RecapCard(vm: MainViewModel, r: com.skarif.kairos.data.Recap) {
+    val c = P.colors
+    val month = java.time.Month.of(r.topMonth).getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault())
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card)).background(c.ink).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Text("Your ${r.year} in music", style = T.small.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = c.inkFg.copy(alpha = 0.7f))
+        Text("${java.text.NumberFormat.getIntegerInstance().format(r.minutes)} minutes", style = T.big.copy(fontSize = 36.sp, lineHeight = 38.sp), color = c.inkFg)
+        Text(
+            "${plural(r.plays, "play")} of ${plural(r.songs, "song")} by ${plural(r.artists, "artist")}" +
+                (if (r.newArtists > 0) ", ${r.newArtists} of them new to you" else "") + ". You listened most in $month.",
+            style = T.body, color = c.inkFg.copy(alpha = 0.85f),
+        )
+        r.topArtists.firstOrNull()?.let { (name, _) -> RecapLine("Top artist", name) }
+        r.topGenre?.let { RecapLine("Top genre", it) }
+        Text("Top songs", style = T.small.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = c.inkFg.copy(alpha = 0.7f))
+        r.topSongs.forEachIndexed { i, (song, ms) ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("${i + 1}", Modifier.width(18.dp), style = T.title, color = c.inkFg.copy(alpha = 0.6f))
+                SongArt(vm, song, 44.dp, corner = 14.dp)
+                Column(Modifier.weight(1f)) {
+                    Text(song.title, style = T.title, color = c.inkFg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(song.artist, style = T.small, color = c.inkFg.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Text(hoursText(ms), style = T.small, color = c.inkFg)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecapLine(label: String, value: String) {
+    val c = P.colors
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), style = T.body, color = c.inkFg.copy(alpha = 0.7f))
+        Text(value, style = T.title.copy(fontSize = 18.sp), color = c.inkFg, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
 @Composable
 private fun StatTile(label: String, value: String, modifier: Modifier) {
     val c = P.colors
-    Column(modifier.clip(RoundedCornerShape(24.dp)).background(c.card).padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(modifier.clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)).background(c.card).padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(label, style = T.small, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(value, style = T.big.copy(fontSize = 28.sp, lineHeight = 30.sp), color = c.text, maxLines = 1)
     }

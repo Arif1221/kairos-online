@@ -1,5 +1,14 @@
 # Changelog
 
+## Online 0.9.1.1
+- Everything from offline Kairos 0.9.1: living album-art background, new menus, lyrics download and share cards, vinyl player, queue dragging, smarter shuffle and radio, new welcome screens and icon
+- New Explore: Quick picks from mixes of what you play, Jump back in, your artists, playlists, new releases, charts and mood pages; opens instantly from the last visit
+- New online search: suggestions, Songs / Videos / Artists / Albums & playlists, more results as you scroll, better ranked songs with tidy titles
+- Album, playlist and artist pages for online results; save any of them as a playlist
+- Online radio and autoplay from YouTube mixes
+- Settings > Streaming > Online check shows what works on your network
+- Sharing an online song shares its link
+
 ## Online 0.7.6.2
 - Kairos Online moved to its own repository, Arif1221/kairos-online
 - Update check and all links now point to the new repository

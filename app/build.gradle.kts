@@ -1,21 +1,20 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
 }
 
 android {
     namespace = "com.skarif.kairos"
-    compileSdk = 35
+    compileSdk { version = release(37) { minorApiLevel = 1 } }
 
     defaultConfig {
         applicationId = "com.skarif.kairos"
         minSdk = 28 // DynamicsProcessing (10-band EQ) needs Android 9
-        targetSdk = 35
+        targetSdk = 37
         // Online: main's version + a 4th online number; versionCode = main's * 10 + that number.
-        versionCode = 222
-        versionName = "0.7.6.2"
+        versionCode = 291
+        versionName = "0.9.1.1"
     }
 
     // Release signing comes from the environment (GitHub secrets in CI), never from the repo.
@@ -33,8 +32,16 @@ android {
         }
     }
 
-    // "play": offline-only build for the Play Store (no internet permission, no YouTube code).
-    // "online": adds YouTube Music search and streaming; shipped on GitHub Releases only.
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = if (hasReleaseKey) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+    // "play": the offline build (same as Arif1221/kairos main). "online": adds YouTube Music search
+    // and streaming; shipped on GitHub Releases only.
     flavorDimensions += "distribution"
     productFlavors {
         create("play") { dimension = "distribution" }
@@ -44,27 +51,19 @@ android {
             versionNameSuffix = "-online"
         }
     }
-
-    buildTypes {
-        release {
-            isMinifyEnabled = true
-            isShrinkResources = true
-            signingConfig = if (hasReleaseKey) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-        }
-    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
         // NewPipeExtractor uses java.nio APIs that need desugaring below API 33.
         isCoreLibraryDesugaringEnabled = true
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
     buildFeatures {
         compose = true
     }
+}
+
+kotlin {
+    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
 }
 
 ksp {
@@ -87,6 +86,7 @@ dependencies {
 
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
+    implementation(libs.androidx.metrics.performance)
     implementation(libs.media3.common)
     implementation(libs.media3.datasource)
     implementation(libs.kotlinx.coroutines.guava)
@@ -98,11 +98,11 @@ dependencies {
     implementation(libs.datastore.preferences)
     implementation(libs.palette.ktx)
 
+    testImplementation(libs.junit)
+
     coreLibraryDesugaring(libs.desugar.jdk.libs.nio)
 
     "onlineImplementation"(libs.newpipe.extractor)
     "onlineImplementation"(libs.okhttp)
     "onlineImplementation"(libs.media3.database)
-
-    testImplementation(libs.junit)
 }

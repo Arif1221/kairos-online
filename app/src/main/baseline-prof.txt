@@ -1,0 +1,5 @@
+# Baseline profile: Android compiles these ahead of time on install (through ProfileInstaller,
+# which Compose brings in), so the first launch and the first scrolls aren't interpreted.
+# Kairos is small, so all of its own code is listed; Compose, Media3 and Room ship their own.
+HSPLcom/skarif/kairos/**->**(**)**
+Lcom/skarif/kairos/**;

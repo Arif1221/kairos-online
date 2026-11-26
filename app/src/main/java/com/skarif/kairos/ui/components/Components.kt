@@ -38,11 +38,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -97,12 +101,42 @@ fun formatTime(ms: Long): String {
     return "${s / 60}:${(s % 60).toString().padStart(2, '0')}"
 }
 
-/** Shrinks slightly while pressed: the tactile feedback every tappable element uses. */
+/**
+ * The press every tappable element shares. Down the instant you touch, a little dimmer; back up
+ * with a soft bounce. A quick tap always shows the whole press: inside a scrolling list Android
+ * reports the press late (it first waits to see if you're scrolling), and a fast tap used to be
+ * released before the button had moved at all. Now a release finishes the dip first, then bounces.
+ * Read only while drawing: nothing recomposes.
+ */
 @Composable
 fun Modifier.pressScale(interaction: MutableInteractionSource, pressed: Float = 0.93f): Modifier {
-    val isPressed by interaction.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (isPressed) pressed else 1f, spring(stiffness = Spring.StiffnessMediumLow), label = "press")
-    return this.graphicsLayer { scaleX = scale; scaleY = scale }
+    val scale = androidx.compose.runtime.remember { androidx.compose.animation.core.Animatable(1f) }
+    androidx.compose.runtime.LaunchedEffect(interaction, pressed) {
+        kotlinx.coroutines.coroutineScope {
+            interaction.interactions.collect { i ->
+                when (i) {
+                    is androidx.compose.foundation.interaction.PressInteraction.Press -> launch {
+                        scale.animateTo(pressed, androidx.compose.animation.core.tween(90, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+                    }
+                    is androidx.compose.foundation.interaction.PressInteraction.Release,
+                    is androidx.compose.foundation.interaction.PressInteraction.Cancel -> launch {
+                        // Not down far enough yet (a fast tap): finish the dip so it's felt.
+                        if (scale.value > pressed + (1f - pressed) * 0.4f) {
+                            scale.animateTo(pressed, androidx.compose.animation.core.tween(70, easing = androidx.compose.animation.core.LinearOutSlowInEasing))
+                        }
+                        // Spring back past 1 a touch and settle: lively, never wobbly.
+                        scale.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.5f, stiffness = 520f))
+                    }
+                }
+            }
+        }
+    }
+    // Pressed things also dim slightly, like an iOS highlight.
+    return this.graphicsLayer {
+        val v = scale.value
+        scaleX = v; scaleY = v
+        alpha = (1f - ((1f - v) / (1f - pressed).coerceAtLeast(0.01f)).coerceIn(0f, 1f) * 0.12f).coerceIn(0f, 1f)
+    }
 }
 
 @Composable
@@ -148,7 +182,7 @@ fun Pill(
     val bg = when {
         accent -> c.accent
         selected -> c.ink
-        else -> c.card
+        else -> LocalPillContainer.current ?: c.card
     }
     val fg = when {
         accent -> c.onAccent
@@ -180,71 +214,12 @@ fun Card(modifier: Modifier = Modifier, color: Color = P.colors.card, content: @
     Column(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(32.dp))
+            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
             .background(color)
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
         content = content,
     )
-}
-
-/**
- * The album cover, heavily blurred, behind every screen, with a light or dark wash and the dot grid.
- * Android 12+ blurs live. Older phones get a 12-pixel copy stretched up, which looks the same at this blur.
- */
-@Composable
-fun ScreenBackground(art: Bitmap?, blur: Boolean, modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
-    if (LocalBackdrop.current) {
-        // The app draws one shared backdrop behind every page; pages only draw their content.
-        Box(modifier.fillMaxSize(), content = content)
-    } else {
-        Box(modifier.fillMaxSize()) {
-            Backdrop(art, blur)
-            content()
-        }
-    }
-}
-
-/** True where a shared [Backdrop] is already drawn behind the page. */
-val LocalBackdrop = androidx.compose.runtime.staticCompositionLocalOf { false }
-
-/** Theme colour, the blurred cover and the dot grid: the app's background. */
-@Composable
-fun Backdrop(art: Bitmap?, blur: Boolean, modifier: Modifier = Modifier) {
-    val c = P.colors
-    Box(modifier.fillMaxSize().background(c.bg)) {
-        if (blur && art != null) {
-            // A 48 px copy, stretched and lightly blurred, looks the same as blurring the full image
-            // at a fraction of the GPU cost. Crossfades when the song changes.
-            Crossfade(art, animationSpec = tween(700), label = "bg") { bmp ->
-                val tiny = remember(bmp) { Bitmap.createScaledBitmap(bmp, 48, 48, true).asImageBitmap() }
-                Image(
-                    tiny, null,
-                    Modifier.fillMaxSize().scale(1.2f).then(if (Build.VERSION.SDK_INT >= 31) Modifier.blur(24.dp, BlurredEdgeTreatment.Unbounded) else Modifier),
-                    contentScale = ContentScale.Crop, filterQuality = FilterQuality.High,
-                )
-            }
-            Box(Modifier.fillMaxSize().background(c.veil))
-        }
-        Spacer(
-            Modifier.fillMaxSize().drawWithCache {
-                // Build the dot grid once per size, not on every frame.
-                val step = 20.dp.toPx()
-                val r = 1.1.dp.toPx()
-                val dots = Path()
-                var y = step / 2
-                while (y < size.height) {
-                    var x = step / 2
-                    while (x < size.width) {
-                        dots.addOval(Rect(x - r, y - r, x + r, y + r))
-                        x += step
-                    }
-                    y += step
-                }
-                onDrawBehind { drawPath(dots, Color(0x337F7F7F)) }
-            },
-        )
-    }
 }
 
 /**
@@ -290,7 +265,7 @@ fun WaveformSeek(
     Column(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(30.dp))
+            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
             .background(c.accent)
             .padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -425,23 +400,26 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mod
     Row(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(26.dp))
+            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
             .background(c.line.copy(alpha = 0.5f))
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         options.forEachIndexed { i, label ->
             val on = i == selected
+            val press = remember { MutableInteractionSource() }
             Box(
                 Modifier
                     .weight(1f)
                     .height(42.dp)
+                    .pressScale(press, 0.95f)
                     .clip(RoundedCornerShape(21.dp))
-                    .background(animateColorAsState(if (on) c.ink else Color.Transparent, tween(250), label = "seg").value)
-                    .selectable(selected = on, role = Role.RadioButton) { onSelect(i) },
+                    // The chosen option wears the album's colour, like the rest of the controls.
+                    .background(animateColorAsState(if (on) c.accent else Color.Transparent, tween(250), label = "seg").value)
+                    .selectable(selected = on, interactionSource = press, indication = ripple(), role = Role.RadioButton) { onSelect(i) },
                 contentAlignment = Alignment.Center,
             ) {
-                Text(label, style = T.label.copy(fontSize = 14.sp), color = animateColorAsState(if (on) c.inkFg else c.text, tween(250), label = "segT").value, maxLines = 1)
+                Text(label, style = T.label.copy(fontSize = 14.sp), color = animateColorAsState(if (on) c.onAccent else c.text, tween(250), label = "segT").value, maxLines = 1)
             }
         }
     }
@@ -453,9 +431,9 @@ fun RadioCard(title: String, description: String, selected: Boolean, onClick: ()
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
             .background(c.card)
-            .border(2.dp, if (selected) c.accent else Color.Transparent, RoundedCornerShape(24.dp))
+            .border(2.dp, if (selected) c.accent else Color.Transparent, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
             .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -571,7 +549,10 @@ fun HatchedBars(
 @Composable
 fun KairosSheet(onDismiss: () -> Unit, content: @Composable androidx.compose.foundation.layout.ColumnScope.(close: () -> Unit) -> Unit) {
     val c = P.colors
-    val state = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val state = androidx.compose.material3.rememberBottomSheetState(
+        androidx.compose.material3.SheetValue.Hidden,
+        setOf(androidx.compose.material3.SheetValue.Hidden, androidx.compose.material3.SheetValue.Expanded),
+    )
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val close: () -> Unit = {
         scope.launch { state.hide() }.invokeOnCompletion { if (!state.isVisible) onDismiss() }
@@ -587,3 +568,147 @@ fun KairosSheet(onDismiss: () -> Unit, content: @Composable androidx.compose.fou
         },
     ) { content(close) }
 }
+
+/**
+ * iOS large-title behaviour: once the page's big title has scrolled away, a small bar with the
+ * title fades and slides in at the top. Tapping it scrolls back to the top.
+ */
+@Composable
+fun BoxScope.CompactTitleBar(title: String, visible: Boolean, onTop: () -> Unit) {
+    val c = P.colors
+    val panel = c.panel
+    androidx.compose.animation.AnimatedVisibility(
+        visible,
+        modifier = Modifier.align(Alignment.TopCenter),
+        enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(160)) +
+            androidx.compose.animation.slideInVertically(com.skarif.kairos.ui.motion.Motion.snappy()) { -it / 2 },
+        exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(120)) +
+            androidx.compose.animation.slideOutVertically(com.skarif.kairos.ui.motion.Motion.snappy()) { -it / 2 },
+    ) {
+        Box(
+            Modifier.fillMaxWidth().background(panel)
+                .clickable(onClickLabel = "Scroll to top", role = Role.Button, onClick = onTop)
+                .statusBarsPadding().padding(vertical = 14.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(title, style = T.title, color = c.text, maxLines = 1)
+        }
+    }
+}
+
+/** Grows a large title a little while the page is pulled down past the top (iOS). Draw phase only. */
+/**
+ * A tab's header panel background that stretches up with the iOS pull: pulled down at the top,
+ * the panel grows to fill the gap above it instead of the list sliding away from the top edge.
+ * One shape drawn per frame, read in the draw phase only (no recomposition). Put it before any clip.
+ */
+/** The tab header panel's shape: square top under the status bar, round bottom. */
+val HeaderShape = RoundedCornerShape(bottomStart = 40.dp, bottomEnd = 40.dp)
+
+/**
+ * Everything a tab header panel needs, in one place: full width, the stretching background,
+ * the clip, the status bar and the padding. Used by [TabHeader] and the Home and Library headers.
+ */
+@Composable
+fun Modifier.headerPanel(pull: () -> Float = { 0f }): Modifier = this
+    .fillMaxWidth()
+    .stretchPanel(P.colors.panel, pull = pull)
+    .clip(HeaderShape)
+    .statusBarsPadding()
+    .padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 18.dp)
+
+fun Modifier.stretchPanel(
+    color: Color,
+    shape: androidx.compose.ui.graphics.Shape = HeaderShape,
+    pull: () -> Float,
+): Modifier = drawBehind {
+    val p = pull().coerceAtLeast(0f)
+    val outline = shape.createOutline(androidx.compose.ui.geometry.Size(size.width, size.height + p), layoutDirection, this)
+    translate(top = -p) { drawOutline(outline, color) }
+}
+
+fun Modifier.stretchTitle(pull: () -> Float): Modifier = graphicsLayer {
+    val s = 1f + (pull().coerceAtLeast(0f) / 1400f).coerceAtMost(0.1f)
+    scaleX = s; scaleY = s
+    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f)
+}
+
+/**
+ * Every dialog in the app. Same slots as Material's AlertDialog, but it pops in like an iOS
+ * alert: from slightly larger and transparent to its size, on a spring with a touch of life.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun KairosDialog(
+    onDismissRequest: () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    dismissButton: (@Composable () -> Unit)? = null,
+    title: (@Composable () -> Unit)? = null,
+    text: (@Composable () -> Unit)? = null,
+    containerColor: Color = P.colors.sheet,
+) {
+    androidx.compose.material3.BasicAlertDialog(onDismissRequest = onDismissRequest, modifier = modifier) {
+        val appear = androidx.compose.runtime.remember { androidx.compose.animation.core.Animatable(0f) }
+        androidx.compose.runtime.LaunchedEffect(Unit) { appear.animateTo(1f, com.skarif.kairos.ui.motion.Motion.ios(0.38f, 0.78f)) }
+        Column(
+            Modifier
+                .graphicsLayer {
+                    val v = appear.value
+                    val s = 1.1f - 0.1f * v
+                    scaleX = s; scaleY = s
+                    alpha = v.coerceIn(0f, 1f)
+                }
+                .heightIn(max = 620.dp)
+                .clip(RoundedCornerShape(30.dp)).background(containerColor)
+                .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            title?.invoke()
+            if (text != null) Box(Modifier.weight(1f, fill = false)) { text() }
+            Row(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                dismissButton?.invoke()
+                confirmButton()
+            }
+        }
+    }
+}
+
+/** For call sites inside `.then(...)`: the same press as [pressScale]. */
+object PressScaleHolder {
+    @Composable
+    fun modifier(interaction: MutableInteractionSource, pressed: Float = 0.93f): Modifier = Modifier.pressScale(interaction, pressed)
+}
+
+/**
+ * The header every main tab uses (Home, Library, Search, Statistics): a frosted panel under the
+ * status bar with round buttons left and right, the page name in the middle, and the page's big
+ * title and controls below. One component, so the tabs look like one app.
+ */
+@Composable
+fun TabHeader(
+    title: String,
+    left: @Composable (chip: Color) -> Unit,
+    right: @Composable (chip: Color) -> Unit,
+    modifier: Modifier = Modifier,
+    /** The list's [com.skarif.kairos.ui.motion.RubberBand.pull], so the panel stretches with it. */
+    pull: () -> Float = { 0f },
+    content: @Composable ColumnScope.(chip: Color) -> Unit,
+) {
+    val c = P.colors
+    val chip = c.chip
+    Column(
+        modifier.headerPanel(pull),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            left(chip)
+            Text(title, Modifier.weight(1f), color = c.text, style = T.title, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            right(chip)
+        }
+        androidx.compose.runtime.CompositionLocalProvider(LocalPillContainer provides chip) { content(chip) }
+    }
+}
+
+/** Unselected pills inside a header panel use the panel's chip colour, so they don't vanish into it. */
+val LocalPillContainer = androidx.compose.runtime.staticCompositionLocalOf<Color?> { null }

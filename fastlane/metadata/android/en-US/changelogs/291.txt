@@ -1,0 +1,5 @@
+• Everything from Kairos 0.9.1
+• New Explore: Quick picks, your artists, playlists, new releases, moods
+• New online search: suggestions, artists, albums, playlists, endless scroll
+• Album, playlist and artist pages; online radio and autoplay
+• Settings > Streaming > Online check

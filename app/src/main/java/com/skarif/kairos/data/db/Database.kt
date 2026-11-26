@@ -18,8 +18,6 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
 import androidx.room.Upsert
-import androidx.room.migration.Migration
-import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 /** One audio file. The id is MediaStore's id, so it stays stable across rescans. */
@@ -131,6 +129,9 @@ interface FavoriteDao {
 
     @Query("DELETE FROM favorites WHERE songId = :songId")
     suspend fun remove(songId: Long)
+
+    @Query("SELECT * FROM favorites")
+    suspend fun all(): List<FavoriteEntity>
 }
 
 @Dao
@@ -153,6 +154,25 @@ abstract class PlaylistDao {
     @Query("DELETE FROM playlists WHERE id = :playlistId")
     abstract suspend fun delete(playlistId: Long)
 
+    @Query("SELECT * FROM playlists ORDER BY createdAt")
+    abstract suspend fun allLists(): List<PlaylistEntity>
+
+    @Query("SELECT * FROM playlist_songs ORDER BY playlistId, position")
+    abstract suspend fun allItems(): List<PlaylistSongEntity>
+
+    @Query("UPDATE playlists SET name = :name WHERE id = :playlistId")
+    abstract suspend fun rename(playlistId: Long, name: String)
+
+    @Query("DELETE FROM playlist_songs WHERE playlistId = :playlistId")
+    abstract suspend fun clear(playlistId: Long)
+
+    /** Rewrites the whole order; positions are the primary key, so they can't be shifted in place. */
+    @Transaction
+    open suspend fun replaceSongs(playlistId: Long, songIds: List<Long>) {
+        clear(playlistId)
+        insertSongs(songIds.mapIndexed { i, s -> PlaylistSongEntity(playlistId, i, s) })
+    }
+
     @Transaction
     open suspend fun append(playlistId: Long, songIds: List<Long>) {
         val start = nextPosition(playlistId)
@@ -169,6 +189,10 @@ abstract class PlaylistDao {
 
 @Dao
 interface PlayEventDao {
+    /** When a song was first played, for the "first played" memory in song info. */
+    @Query("SELECT MIN(startedAt) FROM play_events WHERE songId = :songId")
+    suspend fun firstPlayedAt(songId: Long): Long?
+
     @Insert
     suspend fun insert(e: PlayEventEntity): Long
 
@@ -177,6 +201,15 @@ interface PlayEventDao {
 
     @Query("SELECT * FROM play_events ORDER BY startedAt")
     fun observeAll(): Flow<List<PlayEventEntity>>
+
+    @Query("SELECT * FROM play_events ORDER BY startedAt")
+    suspend fun all(): List<PlayEventEntity>
+
+    @Insert
+    suspend fun insertAll(e: List<PlayEventEntity>)
+
+    @Query("DELETE FROM play_events")
+    suspend fun clear()
 }
 
 @Dao
@@ -186,6 +219,9 @@ interface LyricsOffsetDao {
 
     @Upsert
     suspend fun upsert(o: LyricsOffsetEntity)
+
+    @Query("SELECT * FROM lyrics_offsets")
+    suspend fun all(): List<LyricsOffsetEntity>
 }
 
 @Database(
@@ -217,8 +253,8 @@ abstract class PlayerDatabase : RoomDatabase() {
         }
 
         /** v3: songs.artUrl, for online songs (online flavor). */
-        private val MIGRATION_2_3 = object : Migration(2, 3) {
-            override fun migrate(db: SupportSQLiteDatabase) {
+        private val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE songs ADD COLUMN artUrl TEXT")
             }
         }

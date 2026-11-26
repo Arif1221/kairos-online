@@ -11,14 +11,12 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -30,10 +28,7 @@ import com.skarif.kairos.data.LyricsRepository
 import com.skarif.kairos.data.OutputMode
 import com.skarif.kairos.data.ReplayGainMode
 import com.skarif.kairos.data.Settings
-import com.skarif.kairos.data.StreamQuality
-import android.net.ConnectivityManager
 import com.skarif.kairos.data.db.PlayEventEntity
-import com.skarif.kairos.online.Flavor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -78,10 +73,12 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true) // pause when headphones are unplugged
             // Online flavor: a data source that also understands streamed songs' Uris.
             .apply {
-                Flavor.online?.let { setMediaSourceFactory(DefaultMediaSourceFactory(it.dataSourceFactory(this@PlaybackService, ::streamQuality))) }
+                com.skarif.kairos.online.Flavor.online?.let {
+                    setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(it.dataSourceFactory(this@PlaybackService, ::streamQuality)))
+                }
             }
             // Streams need the network to stay up while the screen is off.
-            .setWakeMode(if (Flavor.online != null) C.WAKE_MODE_NETWORK else C.WAKE_MODE_LOCAL)
+            .setWakeMode(if (com.skarif.kairos.online.Flavor.online != null) C.WAKE_MODE_NETWORK else C.WAKE_MODE_LOCAL)
             .build()
         player.addListener(playerListener)
         player.addAnalyticsListener(analytics)
@@ -127,6 +124,24 @@ class PlaybackService : MediaSessionService() {
 
     /** Items arrive from the UI with only a media id; turn that into the file's content Uri here. */
     private val callback = object : MediaSession.Callback {
+        /**
+         * The lock screen / notification / system media controls connect through the "media
+         * notification controller". Without the timeline command, Media3 stops mirroring the
+         * whole queue to Android's media session: with a 2,000-song queue that mirror was rebuilt
+         * on the main thread on every queue change and froze the app for 100-540 ms (measured
+         * with the in-app performance log). Play/pause, next/previous, seeking and the song's
+         * details keep working there; only the queue list is not shared with the system.
+         */
+        override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
+            if (!session.isMediaNotificationController(controller)) return super.onConnect(session, controller)
+            val commands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
+                .remove(androidx.media3.common.Player.COMMAND_GET_TIMELINE)
+                .build()
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
+                .setAvailablePlayerCommands(commands)
+                .build()
+        }
+
         override fun onAddMediaItems(
             mediaSession: MediaSession,
             controller: MediaSession.ControllerInfo,
@@ -144,13 +159,13 @@ class PlaybackService : MediaSessionService() {
             .build()
     }
 
-    /** Online songs skipped in a row because they failed to load; stops a dead network from racing through the queue. */
+    /** Online songs skipped in a row because they failed to load; stops a dead network racing through the queue. */
     private var onlineSkips = 0
 
     private val playerListener = object : Player.Listener {
         // An online song that fails to load (removed video, YouTube change, no network) is skipped
         // rather than stopping playback, up to 3 in a row.
-        override fun onPlayerError(error: PlaybackException) {
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
             val p = session?.player ?: return
             val online = (p.currentMediaItem?.mediaId?.toLongOrNull() ?: 0L) < 0
             if (online && onlineSkips < 3 && p.hasNextMediaItem()) {
@@ -216,10 +231,10 @@ class PlaybackService : MediaSessionService() {
     }
 
     /** The streaming tier for the next online song: data saver on mobile data if the user wants it. */
-    private fun streamQuality(): StreamQuality {
+    private fun streamQuality(): com.skarif.kairos.data.StreamQuality {
         val s = container.settings.settings.value
-        val metered = getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered == true
-        return if (s.dataSaverOnMobile && metered) StreamQuality.LOW else s.streamQuality
+        val metered = getSystemService(android.net.ConnectivityManager::class.java)?.isActiveNetworkMetered == true
+        return if (s.dataSaverOnMobile && metered) com.skarif.kairos.data.StreamQuality.LOW else s.streamQuality
     }
 
     /** Float output is chosen when the player is built; changing the mode needs a new player. */

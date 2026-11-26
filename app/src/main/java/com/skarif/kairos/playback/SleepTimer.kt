@@ -29,7 +29,7 @@ class SleepTimer(private val player: PlayerConnection, private val scope: Corout
         val endsAt = System.currentTimeMillis() + minutes * 60_000L
         _state.value = SleepState(active = true, endsAt = endsAt, fade = fade)
         job = scope.launch(Dispatchers.Main) {
-            val fadeMs = if (fade) 30_000L else 0L
+            val fadeMs = if (fade) 60_000L else 0L
             delay((endsAt - System.currentTimeMillis() - fadeMs).coerceAtLeast(0))
             if (fade) fadeOut(fadeMs)
             finish()
@@ -53,11 +53,17 @@ class SleepTimer(private val player: PlayerConnection, private val scope: Corout
         _state.value = SleepState()
     }
 
+    /**
+     * Fades like drifting off: loudness falls evenly to the ear, which means the volume level
+     * follows a cube curve (a straight line sounds like nothing happens, then a sudden drop).
+     * 120 small steps over a minute, so no step is audible.
+     */
     private suspend fun fadeOut(ms: Long) {
-        val steps = 30
+        val steps = 120
         val start = player.volume
         for (i in 1..steps) {
-            player.setVolume(start * (1f - i / steps.toFloat()))
+            val left = 1f - i / steps.toFloat()
+            player.setVolume(start * left * left * left)
             delay(ms / steps)
         }
     }

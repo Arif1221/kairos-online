@@ -12,7 +12,6 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.skarif.kairos.data.db.SongEntity
 import com.skarif.kairos.data.db.isOnline
-import com.skarif.kairos.online.Flavor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -23,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class NowPlaying(
     val songId: Long? = null,
@@ -40,6 +40,10 @@ data class NowPlaying(
     val output: String? = null,
     val usbConnected: Boolean = false,
     val outputNeedsRestart: Boolean = false,
+    val speed: Float = 1f,
+    /** "25 of 2071" for the screens: the whole intended queue, even while it is still being added. */
+    val shownPosition: Int = 0,
+    val shownSize: Int = 0,
 )
 
 /** [index] is the player's media item index; [songId] the song. */
@@ -90,12 +94,87 @@ class PlayerConnection(private val context: Context, private val appScope: Corou
     fun onAutoTransition(listener: () -> Unit) { transitionListeners += listener }
     fun removeAutoTransition(listener: () -> Unit) { transitionListeners -= listener }
 
+    private var fillJob: Job? = null
+    // While a long queue is being added: where the tapped song sits in the full list, how long
+    // the full list is, and how many songs have gone in before it so far.
+    private var fillStart = 0
+    private var fillTotal = 0
+    private var fillInsertedBefore = 0
+    private val _filling = MutableStateFlow(false)
+    /** True while a long queue is still being added in the background (see [play]). */
+    val filling: StateFlow<Boolean> = _filling.asStateFlow()
+
+    /**
+     * Plays [songs] from [startIndex]. A long list (a whole library) is not sent to the
+     * playback service in one go: that one call bundles every song across processes on the main
+     * thread and froze the player's opening animation for a moment. The tapped song starts at
+     * once on its own; the rest is added in small batches once the player has opened.
+     */
     fun play(songs: List<SongEntity>, startIndex: Int, shuffle: Boolean = false) {
         val c = controller ?: return
+        if (songs.isEmpty()) return
+        val start = if (shuffle) songs.indices.random() else startIndex.coerceIn(0, songs.lastIndex)
         c.shuffleModeEnabled = shuffle
-        c.setMediaItems(songs.map { it.toMediaItem() }, if (shuffle) (songs.indices).random() else startIndex, 0L)
-        c.prepare()
-        c.play()
+        loadQueue(c, songs, start, 0L, playNow = true)
+    }
+
+    /**
+     * True while the UI is running an animation the user is watching (the player opening or
+     * closing). Big queue updates wait for it; set by the ViewModel.
+     */
+    @Volatile var busy: () -> Boolean = { false }
+
+    /**
+     * Loads a queue. A long one starts with just [start]'s song; the rest is added afterwards in
+     * two calls, once nothing is animating. Every queue change makes Media3 rebuild the whole
+     * queue for Android's media controls (lock screen, notification) on the main thread, so
+     * 2,000 songs in 21 batches meant 21 full rebuilds right after the player opened.
+     */
+    private fun loadQueue(c: MediaController, songs: List<SongEntity>, start: Int, positionMs: Long, playNow: Boolean, firstWaitMs: Long = 400) {
+        fillJob?.cancel()
+        if (songs.size <= 40) {
+            _filling.value = false
+            c.setMediaItems(songs.map { it.toMediaItem() }, start, positionMs)
+            c.prepare(); if (playNow) c.play()
+            return
+        }
+        fillStart = start; fillTotal = songs.size; fillInsertedBefore = 0
+        _filling.value = true
+        c.setMediaItems(listOf(songs[start].toMediaItem()), 0, positionMs)
+        c.prepare(); if (playNow) c.play()
+        fillJob = appScope.launch(Dispatchers.Main) {
+            try {
+                suspend fun idle(ms: Long = 400) { delay(ms); while (busy()) delay(50); delay(200) }
+                idle(firstWaitMs)
+                // Pieces of 250, one per frame: one call with 2,000 songs blocks the main thread for 100+ ms.
+                val after = withContext(Dispatchers.Default) { songs.subList(start + 1, songs.size).map { it.toMediaItem() } }
+                for (part in after.chunked(250)) { while (busy()) delay(50); c.addMediaItems(part); delay(32) }
+                idle()
+                val before = withContext(Dispatchers.Default) { songs.subList(0, start).map { it.toMediaItem() } }
+                // Inserted at the front in reverse piece order, so the final order is unchanged.
+                for (part in before.chunked(250).asReversed()) { while (busy()) delay(50); c.addMediaItems(0, part); fillInsertedBefore += part.size; delay(32) }
+            } finally {
+                _filling.value = false
+                publish()
+            }
+        }
+    }
+
+    /**
+     * Puts a saved queue back, paused, if nothing is loaded yet (the app just started).
+     * Waits for the connection to the playback service.
+     */
+    suspend fun restoreIfEmpty(songs: List<SongEntity>, index: Int, positionMs: Long) {
+        if (songs.isEmpty()) return
+        var c = controller
+        var waited = 0
+        while (c == null && waited < 100) { kotlinx.coroutines.delay(50); waited++; c = controller }
+        c ?: return
+        kotlinx.coroutines.withContext(Dispatchers.Main) {
+            if (c.mediaItemCount > 0) return@withContext
+            // Same gradual loading as play(), started 2.5 s later so it misses the opening animations.
+            loadQueue(c, songs, index.coerceIn(0, songs.lastIndex), positionMs.coerceAtLeast(0), playNow = false, firstWaitMs = 2500)
+        }
     }
 
     fun toggle() = controller?.run { if (isPlaying) pause() else { if (playbackState == Player.STATE_IDLE) prepare(); play() } }
@@ -123,6 +202,25 @@ class PlayerConnection(private val context: Context, private val appScope: Corou
     /** Removes the songs already played. */
     fun clearPlayed() = controller?.run { if (currentMediaItemIndex > 0) removeMediaItems(0, currentMediaItemIndex) }
     fun toggleShuffle() = controller?.run { shuffleModeEnabled = !shuffleModeEnabled }
+
+    /**
+     * Shake to shuffle: puts everything after the current song in a new random order. Done as
+     * one remove and one add (not one move per song, which is a binder call each). With shuffle
+     * mode on, "what's next" isn't the list order, so it's switched off: the list itself is now
+     * random, and the queue shows exactly what will play. False if there's nothing to shuffle.
+     */
+    fun reshuffleUpcoming(): Boolean {
+        val c = controller ?: return false
+        if (filling.value) return false
+        if (c.shuffleModeEnabled) c.shuffleModeEnabled = false
+        val cur = c.currentMediaItemIndex
+        val n = c.mediaItemCount
+        if (n - cur - 1 < 2) return false
+        val rest = (cur + 1 until n).map { c.getMediaItemAt(it) }.shuffled()
+        c.removeMediaItems(cur + 1, n)
+        c.addMediaItems(rest)
+        return true
+    }
     fun cycleRepeat() = controller?.run {
         repeatMode = when (repeatMode) {
             Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
@@ -130,11 +228,21 @@ class PlayerConnection(private val context: Context, private val appScope: Corou
             else -> Player.REPEAT_MODE_OFF
         }
     }
+    fun setSpeed(v: Float) = controller?.setPlaybackSpeed(v.coerceIn(0.25f, 3f))
     fun setVolume(v: Float) = controller?.run { volume = v.coerceIn(0f, 1f) }
     val volume: Float get() = controller?.volume ?: 1f
 
+    /** Puts songs back at a queue position (undo of a removal). */
+    fun insertAt(index: Int, songs: List<SongEntity>) = controller?.run {
+        addMediaItems(index.coerceIn(0, mediaItemCount), songs.map { it.toMediaItem() })
+    }
+
+    /** Adds songs at the end of the queue (autoplay). */
+    fun append(songs: List<SongEntity>) = controller?.run { if (songs.isNotEmpty()) addMediaItems(songs.map { it.toMediaItem() }) }
+
     /** Adds songs right after the current one. */
     fun playNext(songs: List<SongEntity>) = controller?.run {
+        fillJob?.let { if (it.isActive) { it.cancel(); _filling.value = false } }
         addMediaItems((currentMediaItemIndex + 1).coerceAtMost(mediaItemCount), songs.map { it.toMediaItem() })
     }
 
@@ -165,6 +273,10 @@ class PlayerConnection(private val context: Context, private val appScope: Corou
             output = extras.getString(PlaybackService.EXTRA_OUTPUT),
             usbConnected = extras.getBoolean(PlaybackService.EXTRA_USB),
             outputNeedsRestart = extras.getBoolean(PlaybackService.EXTRA_NEEDS_RESTART),
+            speed = c.playbackParameters.speed,
+            shownPosition = if (_filling.value) fillStart - fillInsertedBefore + order.indexOf(c.currentMediaItemIndex).coerceAtLeast(0)
+            else order.indexOf(c.currentMediaItemIndex).coerceAtLeast(0),
+            shownSize = if (_filling.value) fillTotal else c.mediaItemCount,
         )
         if (next != _state.value) _state.value = next
         // Position only changes on its own while playing, so only tick then.
@@ -182,7 +294,7 @@ class PlayerConnection(private val context: Context, private val appScope: Corou
         .setMediaId(id.toString())
         // Online songs carry their stream Uri across to the service; local ones are resolved there from the id.
         .apply {
-            val online = Flavor.online
+            val online = com.skarif.kairos.online.Flavor.online
             if (isOnline && online != null) {
                 setRequestMetadata(MediaItem.RequestMetadata.Builder().setMediaUri(online.mediaUri(this@toMediaItem)).build())
             }

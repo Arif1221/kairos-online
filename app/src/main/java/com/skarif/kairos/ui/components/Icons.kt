@@ -55,12 +55,22 @@ object Ic {
     val RepeatOne by lazy { stroke("repeat1", "M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3M11 10l1.5-1v6") }
     val Search by lazy { stroke("search", "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4") }
     val Menu by lazy { stroke("menu", "M6 10h12M6 14h12") }
-    val Discover by lazy { stroke("discover", "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15.5 8.5l-2 5-5 2 2-5z") }
     val Stats by lazy { stroke("stats", "M5 20v-8M12 20V4M19 20v-5") }
     val Library by lazy { stroke("library", "M5 4v16M10 4v16M14.5 4.5l5 15") }
     val Up by lazy { stroke("up", "M12 19V5M5 12l7-7 7 7") }
     val DownArrow by lazy { stroke("downArrow", "M12 5v14M19 12l-7 7-7-7") }
     val Minus by lazy { stroke("minus", "M5 12h14") }
     val Trash by lazy { stroke("trash", "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13") }
+    val Share by lazy { stroke("share", "M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13") }
+    val Radio by lazy { stroke("radio", "M4.9 19.1a10 10 0 0 1 0-14.2M19.1 4.9a10 10 0 0 1 0 14.2M7.8 16.2a6 6 0 0 1 0-8.4M16.2 7.8a6 6 0 0 1 0 8.4M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z") }
+    val Discover by lazy { stroke("discover", "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15.5 8.5l-2 5-5 2 2-5z") }
+    val Disc by lazy { stroke("disc", "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z") }
+    val Person by lazy { stroke("person", "M20 21a8 8 0 0 0-16 0M12 13a4 4 0 1 0 0-8 4 4 0 0 0 0 8z") }
+    val Info by lazy { stroke("info", "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16v-5M12 8h.01") }
+    val EyeOff by lazy { stroke("eyeOff", "M3 3l18 18M10.6 5.1A9.7 9.7 0 0 1 12 5c6 0 9.5 7 9.5 7a17 17 0 0 1-2.6 3.4M6.6 6.6A17 17 0 0 0 2.5 12S6 19 12 19a9.4 9.4 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2") }
+    val Edit by lazy { stroke("edit", "M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4") }
+    val Speed by lazy { stroke("speed", "M12 21a9 9 0 1 1 9-9M12 12l4-4") }
+    val More by lazy { solid("more", "M5 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM19 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4z") }
+    val AddQueue by lazy { stroke("addQueue", "M3 6h13M3 12h9M3 18h9M18 13v8M14 17h8") }
     val PlaylistAdd by lazy { stroke("playlistAdd", "M3 6h12M3 12h12M3 18h7M17 14v7M13.5 17.5h7") }
 }

@@ -7,6 +7,7 @@ import java.util.List;
 public final class Lyrics {
     public static final String SOURCE_EMBEDDED = "embedded";
     public static final String SOURCE_LRC_FILE = "lrc";
+    public static final String SOURCE_ONLINE = "online";
 
     public final boolean synced;
     public final List<LyricLine> lines;

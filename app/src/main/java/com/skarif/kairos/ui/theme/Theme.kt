@@ -28,6 +28,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.dp
 import com.skarif.kairos.R
 import com.skarif.kairos.data.AlbumColors
 import com.skarif.kairos.data.ArtworkRepository
@@ -46,6 +47,14 @@ data class PlayerColors(
     val veil: Color,
     val line: Color,
     val sheet: Color,
+    /** Tab header panels (Home, Library, Statistics, Search) and the compact title bar. */
+    val panel: Color,
+    /** Round buttons and pills sitting on a [panel]. */
+    val chip: Color,
+    /** The collapsed mini player. */
+    val mini: Color,
+    /** The backdrop's dot pattern. */
+    val dots: Color,
     val accent: Color,
     val onAccent: Color,
     val dark: Boolean,
@@ -79,6 +88,20 @@ object T {
     val body = base.copy(fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium)
     val small = base.copy(fontSize = 13.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium)
     val label = base.copy(fontSize = 15.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold)
+    /** Small caps-style labels above titles ("PLAYING FROM", tile kickers). */
+    val kicker = base.copy(fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+    /** Times and counts: tabular digits, so "1:11" and "8:58" are the same width and don't jitter. */
+    val num = small.copy(fontFeatureSettings = "tnum", fontWeight = FontWeight.SemiBold)
+}
+
+/** Corner radii, so cards, tiles and rows match across screens. */
+object Radius {
+    /** Big cards and panels. */
+    val card = 30.dp
+    /** Rows, list items and small cards. */
+    val item = 24.dp
+    /** Cover thumbnails in rows. */
+    val art = 16.dp
 }
 
 /** "Make it **yours**": the design's light/bold headline. Pass pairs of (text, bold). */
@@ -98,18 +121,29 @@ fun PlayerTheme(settings: Settings, album: AlbumColors?, content: @Composable ()
     val useArt = settings.colorFromArt && album != null
     // Album colours are tuned per theme so the accent never disappears into the background.
     val tuned = remember(useArt, album, settings.fixedColor, dark) {
-        ArtworkRepository.tuneAccent(if (useArt) album!!.accent else settings.fixedColor, dark)
+        ArtworkRepository.tuneAccent(if (useArt) album.accent else settings.fixedColor, dark)
     }
     val accent by animateColorAsState(Color(tuned), tween(700), label = "accent")
     val onAccent by animateColorAsState(Color(ArtworkRepository.onColorFor(tuned)), tween(700), label = "onAccent")
 
-    val c = if (dark) {
+    val c = if (dark && settings.pureBlack) {
+        // AMOLED: true black everywhere, surfaces only a step above it, so the whole screen goes
+        // dark (before, only the page background changed and every card and button stayed grey).
         PlayerColors(
-            bg = if (settings.pureBlack) Color.Black else Color(0xFF121212),
-            card = Color(0xFF2A2A2A), text = Color(0xFFF4F4F0), muted = Color(0xFFA9A9A3),
-            ink = Color(0xFFF4F4F0), inkFg = Color(0xFF151515),
-            veil = if (settings.pureBlack) Color(0xD9000000) else Color(0xB30E0E0E),
-            line = Color(0x29FFFFFF), sheet = Color(0xFF1C1C1C),
+            bg = Color.Black, card = Color(0xFF0E0E0F), text = Color(0xFFF4F4F0), muted = Color(0xFF9C9C97),
+            ink = Color(0xFFF4F4F0), inkFg = Color.Black, veil = Color(0xE6000000),
+            line = Color(0x24FFFFFF), sheet = Color.Black,
+            panel = Color(0xF2000000), chip = Color(0xFF19191A), mini = Color(0xF70E0E0F), dots = Color(0x0FFFFFFF),
+            accent = accent, onAccent = onAccent, dark = true,
+        )
+    } else if (dark) {
+        // Neutral, slightly cool greys (iOS's system greys) instead of flat #2A2A2A, which looked
+        // muddy over a coloured background. Elevation goes bg < card < chip.
+        PlayerColors(
+            bg = Color(0xFF111112), card = Color(0xFF1C1C1E), text = Color(0xFFF4F4F0), muted = Color(0xFFA9A9A3),
+            ink = Color(0xFFF4F4F0), inkFg = Color(0xFF151515), veil = Color(0xD10E0E10),
+            line = Color(0x29FFFFFF), sheet = Color(0xFF1C1C1E),
+            panel = Color(0xEB161618), chip = Color(0xFF2C2C2E), mini = Color(0xF2262628), dots = Color(0x14FFFFFF),
             accent = accent, onAccent = onAccent, dark = true,
         )
     } else {
@@ -117,6 +151,7 @@ fun PlayerTheme(settings: Settings, album: AlbumColors?, content: @Composable ()
             bg = Color(0xFFF7F7F4), card = Color.White, text = Color(0xFF151515), muted = Color(0xFF5C5C58),
             ink = Color(0xFF151515), inkFg = Color.White, veil = Color(0x9EFAFAF7),
             line = Color(0x24151515), sheet = Color(0xFFF7F7F4),
+            panel = Color.White.copy(alpha = 0.92f), chip = Color(0xFFF7F7F4), mini = Color(0xF5FFFFFF), dots = Color(0x337F7F7F),
             accent = accent, onAccent = onAccent, dark = false,
         )
     }

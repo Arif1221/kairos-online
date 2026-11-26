@@ -4,7 +4,7 @@
 
 # Kairos Online
 
-**Kairos, plus YouTube Music and YouTube (audio only): streaming, Discover, offline caching and synced lyrics, in the same player.**
+**Kairos, plus YouTube Music and YouTube (audio only): streaming, Explore, offline caching and synced lyrics, in the same player.**
 
 [![Latest release](https://img.shields.io/github/v/release/Arif1221/kairos-online?label=release&color=8B6CFF)](https://github.com/Arif1221/kairos-online/releases)
 [![Build](https://img.shields.io/github/actions/workflow/status/Arif1221/kairos-online/build.yml?branch=main)](https://github.com/Arif1221/kairos-online/actions/workflows/build.yml)
@@ -65,7 +65,7 @@ Android 9 (API 28) or newer. Bit-perfect USB output needs Android 14.
 
 ## Privacy
 
-Kairos Online collects nothing and has no account. To stream, it talks to YouTube (search, stream URLs, audio) and to [LRCLIB](https://lrclib.net) (lyrics for online songs); those services see your IP address and what you search or play, as with any client. Your library, playlists, history and the stream cache stay on your phone. Read the full [privacy policy](PRIVACY.md).
+Kairos Online collects nothing and has no account. To stream, it talks to YouTube (search, stream URLs, audio; and, for Explore, the titles and artists of the songs you play most) and to [LRCLIB](https://lrclib.net) (lyrics); those services see your IP address and what you search or play, as with any client. Your library, playlists, history and the stream cache stay on your phone. Read the full [privacy policy](PRIVACY.md).
 
 ## Online
 
@@ -76,21 +76,24 @@ This repo keeps two Gradle flavors so the offline repo's code merges in cleanly:
 
 ### Online features
 
-- **Discover** tab (replaces Stats in the dock; Stats is in the menu): "More from" shelves for your most played artists, trending, new releases and mood chips (Bollywood, Lo-fi, Punjabi...).
-- **Search** shows YouTube results under your own songs, with a **Songs / Videos** switch. Videos play as **audio only**; video streams are never downloaded. Shorts are skipped.
-- **Settings > Streaming**: Data saver (~50 kbps), Normal (~128 kbps) or High (~160 kbps Opus), plus "Data saver on mobile data" (default on). Applies from the next song.
-- **Works offline after streaming**: played songs are kept in a 1 GB stream cache (oldest go first) and replay with no connection. Discover shows an **Available offline** shelf when you're offline. Settings > Streaming shows the space used and can clear it.
-- **Synced lyrics** for online songs from [LRCLIB](https://lrclib.net) (free, no key).
-- **Reliability**: YouTube requests are retried once; a song that fails to load is skipped (up to 3 in a row) instead of stopping playback. Search and Discover show an offline state and reload when the connection returns.
-- **Welcome screen** explains streaming and has **Skip, just stream**: no music permission needed, and the app opens on Discover.
-- Discover also has **Recently streamed**, **Music videos** and a long-press menu (play next, favourite, add to playlist).
+- **Explore** tab (replaces Library in the dock; Library moves to Stats' place, Stats is in the menu): **Quick picks** woven from YouTube mixes of the songs you play most, **Jump back in**, **Your artists**, **Playlists for you**, **New releases** and **Charts**. Mood chips (Chill, Party, Focus, Bollywood, Lo-fi...) open playlists and songs for that mood. Explore is saved on the phone, so it opens instantly and refreshes every 6 hours.
+- **Search**: switch between **YouTube Music** and **Your library**. Online search has suggestions as you type, tabs for **Songs, Videos, Artists, Albums & playlists**, and loads more as you scroll. Where YouTube Music's song search comes back empty, music videos are ranked instead (official audio first; covers, reactions, mashups and jukeboxes last) and their titles tidied ("Artist - Song (Official Video)" becomes "Song" by "Artist").
+- **Album, playlist and artist pages** for online results, with Play, Shuffle, Radio and **Save** (as one of your playlists).
+- **Online radio**: tapping an online song plays it with its YouTube mix after it, and autoplay continues an online queue the same way. Local songs keep the library radio.
+- Videos play as **audio only**; video streams are never downloaded. Shorts are skipped.
+- **Settings > Streaming**: Data saver (~50 kbps), Normal (~128 kbps) or High (~160 kbps Opus), plus "Data saver on mobile data" (default on), and an **Online check** that tries search, radio and playback once and shows what works on your network.
+- **Works offline after streaming**: played songs are kept in a 1 GB stream cache (oldest go first) and replay with no connection. Explore shows **Saved on this phone** when you're offline.
+- **Synced lyrics** for online songs from [LRCLIB](https://lrclib.net) (free, no key), with the same download panel as local songs.
+- **Reliability**: YouTube requests are retried once; a song that fails to load is skipped (up to 3 in a row) instead of stopping playback. Search and Explore show an offline state and reload when the connection returns.
+- **Welcome screen** has **Just stream from YouTube Music**: no music permission needed, and the app opens on Explore.
+- Sharing an online song shares its YouTube Music link.
 - Online songs can be favourited, added to playlists, queued, and count in Stats. No ReplayGain for them (no file to read).
 
 ### How it is wired
 
 - `main/.../online/OnlineMusic.kt` is the only thing shared code knows about. `Flavor.online` is `null` in `src/play` and `YouTubeMusic` in `src/online`.
 - Online songs are normal `songs` rows with a **negative id** and `volume = "online"`, so favourites, playlists, stats and the queue need no special cases. They are saved only once played, favourited or added to a playlist, and never appear in the Library.
-- Online state that isn't playback (Discover, network, cache) lives in `ui/OnlineFeatures.kt`, not `MainViewModel`, so merges from main stay small.
+- Online state that isn't playback (Explore, online search, network, cache) lives in `ui/OnlineFeatures.kt`, not `MainViewModel`, so merges from main stay small.
 - Playback goes through `RoutingDataSource`: local Uris go straight to the file, and `kairos-yt:` Uris go through `CacheDataSource` and then `ResolvingDataSource` (the stream URL is only fetched for bytes not in the cache). Each song's quality is pinned the first time it's opened, because seeking reopens the stream at a byte offset and a quality change mid-song would corrupt it.
 - Quality is read each time a stream opens (`dataSourceFactory(context, quality)`), so the setting and Wi-Fi/mobile changes apply from the next song. Resolved URLs are cached per song and quality for 3 hours.
 - Stream URLs expire, so the player gets `kairos-yt:<videoId>` and a `ResolvingDataSource` swaps in a fresh URL when the song is opened.

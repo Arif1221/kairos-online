@@ -15,9 +15,10 @@ Nothing. Kairos Online does not collect, sell or share any personal data, and it
 To stream, the app connects directly from your phone to:
 
 - **YouTube** (youtube.com, googlevideo.com, ytimg.com, googleusercontent.com): search, stream addresses, audio and cover images. YouTube receives your IP address and what you search for and play, as with any YouTube client. Google's privacy policy applies to that traffic.
-- **LRCLIB** (lrclib.net): the title, artist and length of an online song, to find its lyrics.
+- **LRCLIB** (lrclib.net): the title, artist and length of a song, to find its lyrics.
+- **GitHub** (api.github.com): once per launch, to check for a newer Kairos Online release. Nothing about you is sent.
 
-Nothing about your local music library is sent to either service.
+To build Explore (Quick picks and Your artists), the app searches YouTube for the titles and artists of the few songs you play most, including songs on your phone. Nothing else about your music library (files, folders, playlists, history) is sent anywhere.
 
 ## What stays on your phone
 

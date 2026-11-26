@@ -35,7 +35,7 @@ jobs:
           KAIROS_KEY_PASSWORD: ${{ secrets.KAIROS_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew assembleOnlineRelease testOnlineReleaseUnitTest --stacktrace
+          ./gradlew assembleOnlineRelease testOnlineDebugUnitTest --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: kairos-online-apk
@@ -54,4 +54,4 @@ jobs:
           mv app/build/outputs/apk/online/release/*.apk "Kairos-Online-$V.apk"
           gh release create "v$V-online" "Kairos-Online-$V.apk" --target "$GITHUB_SHA" \
             --title "Kairos Online $V" --generate-notes \
-            --notes "Kairos Online: offline Kairos plus YouTube Music and YouTube (audio only). Installs next to offline Kairos. Coming from 0.7.5.2-online or older? Uninstall it once first (signing key changed)."
+            --notes "Kairos Online: offline Kairos plus YouTube Music and YouTube (audio only). Installs next to offline Kairos. Coming from 0.7.5.2-online or older? Uninstall it once first (signing key changed). What's new: see CHANGELOG.md."

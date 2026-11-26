@@ -1,5 +1,11 @@
 package com.skarif.kairos.ui.screens
 
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.material3.Icon
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -47,6 +53,7 @@ import androidx.media3.common.Player
 import com.skarif.kairos.data.OutputMode
 import com.skarif.kairos.data.SongSort
 import com.skarif.kairos.ui.MainViewModel
+import com.skarif.kairos.ui.components.pressScale
 import com.skarif.kairos.ui.components.Card
 import com.skarif.kairos.ui.components.CircleButton
 import com.skarif.kairos.ui.components.HatchedBars
@@ -78,6 +85,8 @@ fun QueuePane(vm: MainViewModel, onBack: () -> Unit, onSaveAsPlaylist: () -> Uni
     val cur by vm.currentSong.collectAsStateWithLifecycle()
     val art by vm.artwork.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
+    // Collected, not read once: rows redraw with the real title and cover as soon as the library loads.
+    val songMap by vm.songMap.collectAsStateWithLifecycle()
     var menuFor by remember { mutableStateOf<Pair<Int, com.skarif.kairos.data.db.SongEntity>?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
     var overflow by remember { mutableStateOf(false) }
@@ -95,7 +104,7 @@ fun QueuePane(vm: MainViewModel, onBack: () -> Unit, onSaveAsPlaylist: () -> Uni
 
     menuFor?.let { (i, song) -> SongActionsDialog(vm, song, onOpenAlbum, queueIndex = i) { menuFor = null } }
     if (confirmClear) {
-        androidx.compose.material3.AlertDialog(
+        com.skarif.kairos.ui.components.KairosDialog(
             onDismissRequest = { confirmClear = false },
             containerColor = c.sheet,
             title = { Text("Clear up next?", style = T.h2, color = c.text) },
@@ -115,7 +124,7 @@ fun QueuePane(vm: MainViewModel, onBack: () -> Unit, onSaveAsPlaylist: () -> Uni
                 CircleButton(Ic.Back, "Back to now playing", onBack, size = 48.dp)
                 Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
                     Text("Queue", style = T.h2, color = c.text)
-                    Text("${now.queuePosition + 1} of ${now.queue.size}, $left up next", style = T.small, color = c.muted)
+                    Text("${now.shownPosition + 1} of ${now.shownSize}, ${(now.shownSize - now.shownPosition - 1).coerceAtLeast(0)} up next", style = T.small, color = c.muted)
                 }
                 Box {
                     CircleButton(Ic.Menu, "Queue options", { overflow = true }, size = 48.dp)
@@ -139,7 +148,7 @@ fun QueuePane(vm: MainViewModel, onBack: () -> Unit, onSaveAsPlaylist: () -> Uni
 
             // Pinned: the current song stays on screen however far you scroll.
             Column(
-                Modifier.padding(horizontal = 18.dp).fillMaxWidth().clip(RoundedCornerShape(30.dp)).background(c.accent)
+                Modifier.padding(horizontal = 18.dp).fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card)).background(c.accent)
                     .clickable(role = Role.Button, onClickLabel = "Show in queue") {
                         scope.launch { list.animateScrollToItem((now.queuePosition - 1).coerceAtLeast(0)) }
                     }
@@ -176,29 +185,61 @@ fun QueuePane(vm: MainViewModel, onBack: () -> Unit, onSaveAsPlaylist: () -> Uni
             }
             Text(
                 if (now.shuffle) "Swipe left to remove. Hold a song for more."
-                else "Swipe right to play next, left to remove. Hold a song for more.",
+                else "Drag ≡ to reorder. Swipe right to play next, left to remove.",
                 Modifier.padding(horizontal = 22.dp, vertical = 8.dp), style = T.small, color = c.muted,
             )
 
+            // Drag to reorder (shuffle off). Plain values, read while drawing: no recomposition per move.
+            val drag = remember { QueueDrag() }
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val gapPx = with(density) { 6.dp.toPx() }
             Box(Modifier.weight(1f)) {
                 LazyColumn(
                     Modifier.fillMaxSize(), state = list,
+                    flingBehavior = com.skarif.kairos.ui.motion.rememberIosFling(),
                     contentPadding = PaddingValues(start = 18.dp, end = 18.dp, top = 2.dp, bottom = 120.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    itemsIndexed(now.queue, key = { _, e -> e.index }) { pos, e ->
-                        val song = vm.song(e.songId)
+                    itemsIndexed(now.queue, key = { _, e -> e.index }, contentType = { _, _ -> "queue" }) { pos, e ->
+                        val song = songMap[e.songId]
                         val playing = pos == now.queuePosition
                         val played = pos < now.queuePosition
-                        Box(Modifier.animateItem()) {
+                        Box(
+                            Modifier
+                                .then(if (drag.key == e.index) Modifier else Modifier.animateItem())
+                                .onSizeChanged { drag.rowPx = it.height.toFloat() }
+                                .zIndex(if (drag.key == e.index) 1f else 0f)
+                                .graphicsLayer {
+                                    val from = drag.fromPos
+                                    if (drag.key == null || from < 0) return@graphicsLayer
+                                    if (drag.key == e.index) {
+                                        translationY = drag.offset
+                                        scaleX = 1.03f; scaleY = 1.03f
+                                        shadowElevation = 12.dp.toPx(); shape = RoundedCornerShape(22.dp)
+                                    } else {
+                                        // Rows between the start and the target slide out of the way.
+                                        val to = drag.target(gapPx, now.queue.size)
+                                        val step = drag.rowPx + gapPx
+                                        translationY = when {
+                                            pos in (from + 1)..to -> -step
+                                            pos in to until from -> step
+                                            else -> 0f
+                                        }
+                                    }
+                                },
+                        ) {
                             SwipeActions(
                                 "Play next", Ic.Next, if (playing || now.shuffle) null else ({ vm.moveToNext(e.index) }),
                                 "Remove", Ic.Close, if (playing) null else ({ vm.removeQueueItem(e.index) }),
                             ) {
+                                val press = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
                                 Row(
-                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
+                                    Modifier.fillMaxWidth()
+                                        .pressScale(press, 0.97f)
+                                        .clip(RoundedCornerShape(22.dp))
                                         .background(if (playing) c.tint else c.card.copy(alpha = if (played) 0.4f else 0.8f))
                                         .combinedClickable(
+                                            interactionSource = press, indication = androidx.compose.material3.ripple(),
                                             role = Role.Button, onClickLabel = "Play", onLongClickLabel = "More options",
                                             onLongClick = { if (song != null) menuFor = e.index to song },
                                         ) { vm.playQueueItem(e.index) }
@@ -213,12 +254,26 @@ fun QueuePane(vm: MainViewModel, onBack: () -> Unit, onSaveAsPlaylist: () -> Uni
                                     SongArt(vm, song, 44.dp, corner = 12.dp)
                                     Column(Modifier.weight(1f)) {
                                         Text(
-                                            song?.title ?: "Unknown", style = T.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                            song?.title ?: "Not on this phone any more", style = T.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                             color = c.text.copy(alpha = if (played) 0.5f else 1f),
                                         )
                                         Text(song?.artist ?: "", style = T.small, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
-                                    Text(formatTime(song?.durationMs ?: 0), style = T.small, color = c.muted)
+                                    Text(formatTime(song?.durationMs ?: 0), style = T.num, color = c.muted)
+                                    if (!now.shuffle) Icon(
+                                        Ic.Menu, "Drag to reorder", tint = c.muted,
+                                        modifier = Modifier.size(28.dp).pointerInput(e.index, pos) {
+                                            detectVerticalDragGestures(
+                                                onDragStart = { drag.key = e.index; drag.fromPos = pos; drag.offset = 0f },
+                                                onDragEnd = {
+                                                    val to = drag.target(gapPx, now.queue.size)
+                                                    if (to != pos) now.queue.getOrNull(to)?.let { vm.moveQueueItem(e.index, it.index) }
+                                                    drag.reset()
+                                                },
+                                                onDragCancel = { drag.reset() },
+                                            ) { change, dy -> change.consume(); drag.offset += dy }
+                                        },
+                                    )
                                 }
                             }
                         }
@@ -278,7 +333,7 @@ fun EqualizerSheet(vm: MainViewModel, onBack: () -> Unit) {
 
     KairosSheet(onBack) { close ->
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding()
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState(), flingBehavior = com.skarif.kairos.ui.motion.rememberIosFling()).navigationBarsPadding()
                 .padding(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
@@ -388,7 +443,7 @@ fun SleepTimerSheet(vm: MainViewModel, onBack: () -> Unit) {
                     listOf(15, 30, 45, 60).forEach { m -> Pill("$m min", { minutes = m; endOfSong = false }, selected = !endOfSong && minutes == m) }
                     Pill("End of song", { endOfSong = true }, selected = endOfSong)
                 }
-                ToggleRow("Fade out", fade, { fade = it }, "Lower the volume over the last 30 seconds")
+                ToggleRow("Fade out", fade, { fade = it }, "Gently lower the volume over the last minute")
                 Pill("Start timer", {
                     if (endOfSong) vm.startSleepEndOfSong(fade) else vm.startSleep(minutes, fade)
                     close()
@@ -441,24 +496,26 @@ fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> U
     val cur by vm.currentSong.collectAsStateWithLifecycle()
     val now by vm.now.collectAsStateWithLifecycle()
     val sleep by vm.sleep.collectAsStateWithLifecycle()
-    val items = listOf(
-        Triple("Home", "home", Ic.Home), Triple("Library", "library", Ic.Library), Triple("Playlists", "playlists", Ic.Queue),
+    val items = listOfNotNull(
+        Triple("Home", "home", Ic.Home),
+        vm.onlineName?.let { Triple("Explore", "discover", Ic.Discover) },
+        Triple("Library", "library", Ic.Library), Triple("Playlists", "playlists", Ic.Queue),
         Triple("Search", "search", Ic.Search), Triple("Statistics", "stats", Ic.Stats), Triple("Queue", "queue", Ic.Queue),
         Triple("Equalizer", "eq", Ic.Sliders), Triple(if (sleep.active) "Sleep timer (on)" else "Sleep timer", "sleep", Ic.Clock),
         Triple("Music folders", "folders", Ic.Folder), Triple("Settings", "settings", Ic.Settings),
-    ).let { base -> if (vm.onlineName != null) listOf(Triple("Discover", "discover", Ic.Discover)) + base else base }
+    )
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color(0x61000000)).clickable(onClickLabel = "Close menu", onClick = onClose))
         Column(
             Modifier.fillMaxSize().padding(end = 70.dp).clip(RoundedCornerShape(topEnd = 38.dp, bottomEnd = 38.dp)).background(c.sheet)
-                .verticalScroll(rememberScrollState()).statusBarsPadding().navigationBarsPadding().padding(18.dp),
+                .verticalScroll(rememberScrollState(), flingBehavior = com.skarif.kairos.ui.motion.rememberIosFling()).statusBarsPadding().navigationBarsPadding().padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             CircleButton(Ic.Close, "Close menu", onClose, container = c.ink, content = c.inkFg)
             Text(mixedHeadline("Your " to false, "music" to true), style = T.h1.copy(fontSize = 32.sp), color = c.text)
             if (cur != null) {
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(c.accent)
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)).background(c.accent)
                         .clickable(role = Role.Button, onClickLabel = "Open now playing") { onNavigate("now") }.padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -472,7 +529,7 @@ fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> U
             }
             items.forEach { (label, route, icon) ->
                 Row(
-                    Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(26.dp))
+                    Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
                         .selectable(false, role = Role.Button) { onNavigate(route) },
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -485,4 +542,17 @@ fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> U
             Box(Modifier.width(1.dp).height(8.dp))
         }
     }
+}
+
+/** The queue row being dragged: which one, where it started, how far it has moved. */
+@androidx.compose.runtime.Stable
+private class QueueDrag {
+    var key by androidx.compose.runtime.mutableStateOf<Int?>(null)
+    var fromPos = -1
+    var offset by androidx.compose.runtime.mutableFloatStateOf(0f)
+    var rowPx = 1f
+    /** The position the row would land on if dropped now. */
+    fun target(gapPx: Float, size: Int): Int =
+        (fromPos + kotlin.math.round(offset / (rowPx + gapPx)).toInt()).coerceIn(0, (size - 1).coerceAtLeast(0))
+    fun reset() { key = null; fromPos = -1; offset = 0f }
 }

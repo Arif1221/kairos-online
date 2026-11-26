@@ -4,6 +4,7 @@ import android.app.Application
 import com.skarif.kairos.data.ArtworkRepository
 import com.skarif.kairos.data.LyricsRepository
 import com.skarif.kairos.data.MediaScanner
+import com.skarif.kairos.data.OnlineLyrics
 import com.skarif.kairos.data.SettingsStore
 import com.skarif.kairos.data.db.PlayerDatabase
 import com.skarif.kairos.playback.PlayerConnection
@@ -48,7 +49,10 @@ class AppContainer(app: Application) {
     val db = PlayerDatabase.create(app)
     val settings = SettingsStore(app, scope)
     val scanner = MediaScanner(app, db.songs())
-    val lyrics = LyricsRepository(app, db.lyricsOffsets())
+    val lyrics = LyricsRepository(
+        app, db.lyricsOffsets(),
+        OnlineLyrics(app, "Kairos/${runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull() ?: "?"} (https://github.com/Arif1221/kairos)"),
+    )
     val artwork = ArtworkRepository(app)
     val player = PlayerConnection(app, scope)
     val sleep = SleepTimer(player, scope)

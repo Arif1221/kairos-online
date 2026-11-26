@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Share cards (lyrics, Wrapped) are written here before sharing; nothing else is exposed. -->
+<paths>
+    <cache-path name="share" path="share/" />
+</paths>
