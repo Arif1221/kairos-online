@@ -103,7 +103,8 @@ sealed interface UpdateState {
     data object Idle : UpdateState
     data object Checking : UpdateState
     data object UpToDate : UpdateState
-    data class Available(val version: String, val url: String) : UpdateState
+    /** [apkUrl] is the APK to install in the app; [url] the release page; [notes] what's new. */
+    data class Available(val version: String, val url: String, val apkUrl: String?, val notes: List<String>) : UpdateState
     data object Failed : UpdateState
 }
 
@@ -412,9 +413,14 @@ class OnlineFeatures(
         catch (e: CancellationException) { throw e } catch (e: Exception) { Loadable.Failed(failMessage(e)) }
     }
 
+    /** [id] "_" means "find them by [name]" (from the player or a song's menu, where only the name is known). */
     suspend fun artist(id: String, name: String): Loadable<OnlineArtist> {
         val s = source ?: return Loadable.Failed("Not available")
-        return try { Loadable.Ready(s.artist(id, name).also { seen(it.songs) }) }
+        return try {
+            val channel = if (id.isNotBlank() && id != "_") id else
+                (s.search(name, OnlineKind.ARTISTS).items.firstOrNull() as? OnlineItem.Artist)?.id ?: ""
+            Loadable.Ready(s.artist(channel, name).also { seen(it.songs) })
+        }
         catch (e: CancellationException) { throw e } catch (e: Exception) { Loadable.Failed(failMessage(e)) }
     }
 
@@ -650,13 +656,14 @@ class OnlineFeatures(
                 val arr = JSONArray(body)
                 val latest = (0 until arr.length()).map { arr.getJSONObject(it) }
                     .filter { !it.optBoolean("draft") && !it.optBoolean("prerelease") }
-                    .map { it.optString("tag_name") to it.optString("html_url") }
-                    .filter { (tag, _) -> tag.startsWith("v") && tag.endsWith("-online") }
-                    .maxWithOrNull { a, b -> compareVersions(a.first.version(), b.first.version()) }
-                when {
-                    latest == null -> UpdateState.UpToDate
-                    compareVersions(latest.first.version(), appVersion) > 0 -> UpdateState.Available(latest.first.version(), latest.second)
-                    else -> UpdateState.UpToDate
+                    .filter { it.optString("tag_name").let { t -> t.startsWith("v") && t.endsWith("-online") } }
+                    .maxWithOrNull { a, b -> compareVersions(a.optString("tag_name").version(), b.optString("tag_name").version()) }
+                val v = latest?.optString("tag_name")?.version()
+                if (latest == null || v == null || compareVersions(v, appVersion) <= 0) UpdateState.UpToDate else {
+                    val assets = latest.optJSONArray("assets") ?: JSONArray()
+                    val apk = (0 until assets.length()).map { assets.getJSONObject(it) }
+                        .firstOrNull { it.optString("name").endsWith(".apk") }?.optString("browser_download_url")
+                    UpdateState.Available(v, latest.optString("html_url"), apk, changelogFor(v))
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -664,6 +671,35 @@ class OnlineFeatures(
                 UpdateState.Failed
             }
         }
+    }
+
+    /** "What's new" for [version]: its section of CHANGELOG.md on GitHub, as bullet lines. */
+    private fun changelogFor(version: String): List<String> = runCatching {
+        val text = URL("https://raw.githubusercontent.com/$REPO/main/CHANGELOG.md").readText()
+        text.substringAfter("## Online $version\n", "").substringBefore("\n## ")
+            .lines().map { it.trim() }.filter { it.startsWith("- ") }.map { it.removePrefix("- ") }.take(8)
+    }.getOrDefault(emptyList())
+
+    /** Downloads the update and installs it over this version (see [com.skarif.kairos.online.SelfUpdate]). */
+    fun installUpdate() {
+        val u = _update.value as? UpdateState.Available ?: return
+        val apk = u.apkUrl ?: return
+        scope.launch { com.skarif.kairos.online.SelfUpdate.downloadAndInstall(app, apk) }
+    }
+
+    private val updatePrefs = app.getSharedPreferences("updates", android.content.Context.MODE_PRIVATE)
+    private val _skipped = MutableStateFlow(updatePrefs.getString("skipped", null))
+    /** The version the user said "Later" to; its popup isn't shown again (the banner stays). */
+    val skippedUpdate: StateFlow<String?> = _skipped.asStateFlow()
+    /** Shows the update popup again (from the Home banner or Settings). */
+    fun showUpdate() {
+        _skipped.value = null
+        updatePrefs.edit().remove("skipped").apply()
+    }
+
+    fun skipUpdate(version: String) {
+        _skipped.value = version
+        updatePrefs.edit().putString("skipped", version).apply()
     }
 
     private fun String.version() = removePrefix("v").removeSuffix("-online")

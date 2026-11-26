@@ -1,5 +1,15 @@
 # Changelog
 
+## Online 0.9.1.4
+- One Home for streaming and your phone: Quick picks, Jump back in, downloads, your mixes and online shelves together
+- Same dock as offline Kairos: Home, Library, Now playing, Stats, Search
+- Library: Favourites, Playlists, Downloads and Recently played tiles
+- Search: one box for YouTube Music and this phone, with filter chips
+- Artist names in the player and song menu open the artist's online page
+- In-app updates: a popup shows what's new and installs the update in place
+- Tips that explain each screen, and Show tips again in Settings
+- Settings > Credits lists every project Kairos Online is built with
+
 ## Online 0.9.1.3
 - Save to phone: online songs, albums and playlists as M4A files in Music/Kairos, tagged with title, artist and cover
 - Download buttons on every online song row and in the player, with progress

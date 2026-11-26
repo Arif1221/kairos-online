@@ -70,7 +70,9 @@ import com.skarif.kairos.ui.ShelfStyle
 import com.skarif.kairos.ui.components.CircleButton
 import com.skarif.kairos.ui.components.CompactTitleBar
 import com.skarif.kairos.ui.components.Ic
+import com.skarif.kairos.ui.components.KairosDialog
 import com.skarif.kairos.ui.components.Pill
+import com.skarif.kairos.ui.components.PillMeter
 import com.skarif.kairos.ui.components.ScreenBackground
 import com.skarif.kairos.ui.components.TabHeader
 import com.skarif.kairos.ui.components.pressScale
@@ -272,14 +274,21 @@ private fun CardShelf(vm: MainViewModel, title: String, subtitle: String?, items
 // ---- Explore --------------------------------------------------------------------------------
 
 @Composable
-fun ExploreScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenNowPlaying: () -> Unit, onDownloads: () -> Unit) {
+fun ExploreScreen(
+    vm: MainViewModel,
+    onMenu: () -> Unit,
+    onOpenNowPlaying: () -> Unit,
+    onDownloads: () -> Unit,
+    onOpenCollection: (String) -> Unit,
+    onSearch: () -> Unit,
+) {
     val o = vm.onlineUi
     val c = P.colors
     val nav = LocalOnlineNav.current
     val uri = LocalUriHandler.current
     val state by o.explore.collectAsStateWithLifecycle()
     val up by o.networkUp.collectAsStateWithLifecycle()
-    val recent by o.recentlyStreamed.collectAsStateWithLifecycle()
+    val mixes by vm.mixes.collectAsStateWithLifecycle()
     val offline by o.availableOffline.collectAsStateWithLifecycle()
     val downloads by o.downloads.collectAsStateWithLifecycle()
     val update by o.update.collectAsStateWithLifecycle()
@@ -293,7 +302,7 @@ fun ExploreScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenNowPlaying: () ->
     val pastTitle by remember { derivedStateOf { list.firstVisibleItemIndex > 0 } }
 
     LaunchedEffect(Unit) { o.loadExplore() }
-    LaunchedEffect(Unit) { vm.tabReselected.collect { if (it == "discover") list.animateScrollToItem(0) } }
+    LaunchedEffect(Unit) { vm.tabReselected.collect { if (it == "home") list.animateScrollToItem(0) } }
 
     fun play(songs: List<SongEntity>, i: Int, from: String) { vm.play(songs, i, from); onOpenNowPlaying() }
     val openItem: (OnlineItem) -> Unit = { open(vm, it, onOpenNowPlaying, nav) }
@@ -309,22 +318,34 @@ fun ExploreScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenNowPlaying: () ->
         ) {
             item(key = "header") {
                 TabHeader(
-                    "Explore",
+                    "Home",
                     left = { chip -> CircleButton(Ic.Menu, "Menu", onMenu, container = chip, content = c.text) },
-                    right = { chip -> CircleButton(Ic.Search, "Search", { nav.search("", OnlineKind.SONGS) }, container = chip, content = c.text) },
+                    right = { chip -> CircleButton(Ic.Search, "Search", onSearch, container = chip, content = c.text) },
                     pull = { band.pull },
                 ) {
-                    Text(mixedHeadline("Explore " to false, "something new" to true), Modifier.stretchTitle { band.pull }, style = T.h1.copy(fontSize = 34.sp, lineHeight = 38.sp), color = c.text)
+                    val part = remember { when (java.time.LocalTime.now().hour) { in 5..11 -> "morning"; in 12..16 -> "afternoon"; in 17..21 -> "evening"; else -> "night" } }
+                    Text(mixedHeadline("Good " to false, part to true), Modifier.stretchTitle { band.pull }, style = T.h1.copy(fontSize = 34.sp, lineHeight = 38.sp), color = c.text)
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Pill("For you", { if (moodIndex >= 0) o.selectMood(moodIndex) }, selected = moodIndex < 0, icon = Ic.Discover)
                         EXPLORE_MOODS.forEachIndexed { i, (label, _) -> Pill(label, { o.selectMood(i) }, selected = moodIndex == i) }
                     }
                 }
             }
+            item(key = "hint") {
+                com.skarif.kairos.ui.components.HintCard(
+                    "home", "This is Home",
+                    listOf(
+                        "Quick picks, Jump back in and Made for you come from what you play, streamed or on this phone.",
+                        "The chips under the greeting switch Home to playlists and songs for one mood. For you brings it back.",
+                        "Hold any song for more: play next, download, save to phone, go to the artist.",
+                        "Bottom bar: Home · Library · ▶ Now playing · Stats · Search.",
+                    ),
+                )
+            }
             (update as? com.skarif.kairos.ui.UpdateState.Available)?.let { u ->
                 item(key = "update") {
                     Banner("Kairos Online ${u.version} is out", "Fixes and new features. Installs over this version.") {
-                        Pill("Get it", { uri.openUri(u.url) }, selected = true)
+                        Pill("Update", { o.showUpdate() }, selected = true)
                     }
                 }
             }
@@ -335,24 +356,46 @@ fun ExploreScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenNowPlaying: () ->
                     else "${offline.size} ${if (offline.size == 1) "song plays" else "songs play"} without a connection.",
                 )
             }
-            if (downloads.isNotEmpty()) item(key = "downloads") {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(Modifier.fillMaxWidth().padding(end = 18.dp), verticalAlignment = Alignment.Bottom) {
-                        Box(Modifier.weight(1f)) { ShelfTitle("Your downloads", "${downloads.size} songs · play offline") }
-                        Pill("See all", onDownloads)
-                    }
-                    LazyRow(contentPadding = PaddingValues(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        itemsIndexed(downloads.take(20), key = { _, s -> "dl${s.id}" }) { i, s ->
-                            OnlineCard(vm, OnlineItem.Track(s), onLongClick = { actionsFor = s }) { play(downloads, i, "Downloads") }
-                        }
-                    }
-                }
-            }
             // Streamed songs still in the cache also play offline.
             val cachedOnly = offline.filter { s -> downloads.none { it.id == s.id } }
             if (!up && cachedOnly.isNotEmpty()) item(key = "saved") {
                 CardShelf(vm, "Also saved on this phone", null, cachedOnly.map(OnlineItem::Track), { actionsFor = it }) { item ->
                     (item as? OnlineItem.Track)?.let { t -> play(cachedOnly, cachedOnly.indexOf(t.song), "Saved on this phone") }
+                }
+            }
+            // What's yours, streamed or on this phone: works offline, so it never waits for the network.
+            fun yours() {
+                val lastPlayed = mixes.firstOrNull { it.key == "lastplayed" }?.songs.orEmpty().take(20)
+                if (lastPlayed.isNotEmpty()) item(key = "recent") {
+                    CardShelf(vm, "Jump back in", null, lastPlayed.map(OnlineItem::Track), { actionsFor = it }) { item ->
+                        (item as? OnlineItem.Track)?.let { t -> play(lastPlayed, lastPlayed.indexOf(t.song), "Recently played") }
+                    }
+                }
+                if (downloads.isNotEmpty()) item(key = "downloads") {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(Modifier.fillMaxWidth().padding(end = 18.dp), verticalAlignment = Alignment.Bottom) {
+                            Box(Modifier.weight(1f)) { ShelfTitle("Your downloads", "${downloads.size} songs · play offline") }
+                            Pill("See all", onDownloads)
+                        }
+                        LazyRow(contentPadding = PaddingValues(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            itemsIndexed(downloads.take(20), key = { _, s -> "dl${s.id}" }) { i, s ->
+                                OnlineCard(vm, OnlineItem.Track(s), onLongClick = { actionsFor = s }) { play(downloads, i, "Downloads") }
+                            }
+                        }
+                    }
+                }
+                val own = mixes.filter { it.songs.isNotEmpty() && it.key != "lastplayed" }.take(10)
+                if (own.isNotEmpty()) item(key = "mixes") {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        ShelfTitle("Made for you", "From what you play")
+                        LazyRow(contentPadding = PaddingValues(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items(own, key = { "mx" + it.key }) { m ->
+                                Box(Modifier.width(160.dp)) {
+                                    CoverTile(vm, m.songs.first(), key = m.key, kicker = "${m.songs.size} songs", title = m.title) { onOpenCollection(m.key) }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             if (moodIndex >= 0) {
@@ -378,8 +421,11 @@ fun ExploreScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenNowPlaying: () ->
                 }
             } else {
                 when (val st = state) {
-                    ExploreState.Loading -> items(3, key = { "sk$it" }) { SkeletonShelf() }
-                    is ExploreState.Failed -> if (up || offline.isEmpty()) item(key = "fail") { Status(st.message, "Try again" to { o.loadExplore(force = true) }) }
+                    ExploreState.Loading -> { yours(); items(3, key = { "sk$it" }) { SkeletonShelf() } }
+                    is ExploreState.Failed -> {
+                        yours()
+                        if (up || offline.isEmpty()) item(key = "fail") { Status(st.message, "Try again" to { o.loadExplore(force = true) }) }
+                    }
                     is ExploreState.Ready -> {
                         if (st.refreshing) item(key = "refreshing") { Status("Updating for you...") }
                         st.shelves.forEachIndexed { i, shelf ->
@@ -389,23 +435,19 @@ fun ExploreScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenNowPlaying: () ->
                                     else -> CardShelf(vm, shelf.title, shelf.subtitle, shelf.items, { actionsFor = it }, openItem)
                                 }
                             }
-                            // Your recent streams sit right after the first shelf; they need no connection.
-                            if (i == 0 && recent.isNotEmpty() && up) item(key = "recent") {
-                                CardShelf(vm, "Jump back in", null, recent.take(20).map(OnlineItem::Track), { actionsFor = it }) { item ->
-                                    (item as? OnlineItem.Track)?.let { t -> play(recent, recent.indexOf(t.song), "Recently streamed") }
-                                }
-                            }
+                            // Your own music sits right after Quick picks.
+                            if (i == 0) yours()
                         }
                         item(key = "refresh") {
                             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                Pill("Refresh Explore", { o.loadExplore(force = true) }, icon = Ic.Refresh)
+                                Pill("Refresh", { o.loadExplore(force = true) }, icon = Ic.Refresh)
                             }
                         }
                     }
                 }
             }
         }
-        CompactTitleBar("Explore", pastTitle) { scope.launch { list.animateScrollToItem(0) } }
+        CompactTitleBar("Home", pastTitle) { scope.launch { list.animateScrollToItem(0) } }
     }
     actionsFor?.let { s -> SongActionsDialog(vm, s, onOpenAlbum = {}) { actionsFor = null } }
 }
@@ -657,6 +699,16 @@ fun DownloadsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenNowPlaying: () 
                 Column(Modifier.statusBarsPadding().padding(start = 18.dp, end = 18.dp, top = 12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     CircleButton(Ic.Back, "Back", onBack)
                     Text(mixedHeadline("Your " to false, "downloads" to true), style = T.h1, color = c.text)
+                    com.skarif.kairos.ui.components.HintCard(
+                        "downloads", "Download or Save to phone?",
+                        listOf(
+                            "Download keeps a song inside Kairos. It plays offline, but only in Kairos. These are listed here.",
+                            "Save to phone makes an M4A file in Music/Kairos that any app can play. Those show in Library, under the songs on this phone.",
+                            "On a song: ↓ download · ring = downloading (tap to cancel) · ✓ on this phone.",
+                            "Settings > Downloads & storage picks what the ↓ button does.",
+                        ),
+                        inset = 0.dp,
+                    )
                     Text(
                         if (downloads.isEmpty()) "Nothing downloaded yet. Hold an online song and tap Download, or use Download all on an album or playlist."
                         else "${downloads.size} songs, ${bytes / 1_048_576} MB. They play without a connection and stay until you remove them.",
@@ -721,4 +773,74 @@ fun DownloadButton(
             size = size, container = container, content = if (done && p == null) accent else content, iconSize = size * 0.45f,
         )
     }
+}
+
+/**
+ * "A new version is out": what's new, and Update, which downloads and installs it in place.
+ * Shown once per version; "Later" leaves only the banner on Home and the line in Settings.
+ */
+@Composable
+fun UpdateDialog(vm: MainViewModel) {
+    val o = vm.onlineUi
+    val c = P.colors
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val uri = LocalUriHandler.current
+    val update by o.update.collectAsStateWithLifecycle()
+    val skipped by o.skippedUpdate.collectAsStateWithLifecycle()
+    val status by com.skarif.kairos.online.SelfUpdate.status.collectAsStateWithLifecycle()
+    val u = update as? com.skarif.kairos.ui.UpdateState.Available ?: return
+    val busy = status is com.skarif.kairos.online.SelfUpdate.Status.Downloading || status is com.skarif.kairos.online.SelfUpdate.Status.Installing
+    if (!busy && skipped == u.version) return
+    // Coming back from "Install unknown apps" settings with the permission granted: carry on.
+    var waitingForPermission by remember { mutableStateOf(false) }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(waitingForPermission) {
+        if (!waitingForPermission) return@LaunchedEffect
+        lifecycle.currentStateFlow.collect { st ->
+            if (st == androidx.lifecycle.Lifecycle.State.RESUMED && com.skarif.kairos.online.SelfUpdate.canInstall(ctx)) {
+                waitingForPermission = false
+                o.installUpdate()
+            }
+        }
+    }
+    KairosDialog(
+        onDismissRequest = { if (!busy) o.skipUpdate(u.version) },
+        containerColor = c.sheet,
+        title = { Text("Kairos Online ${u.version} is here", style = T.h2, color = c.text) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (u.notes.isNotEmpty()) {
+                    Text("What's new", style = T.title, color = c.text)
+                    u.notes.forEach { Text("• $it", style = T.body, color = c.muted) }
+                } else Text("Fixes and improvements.", style = T.body, color = c.muted)
+                when (val st = status) {
+                    is com.skarif.kairos.online.SelfUpdate.Status.Downloading -> {
+                        Text("Downloading ${(st.progress * 100).toInt()}%", style = T.small, color = c.text)
+                        PillMeter((st.progress * 20).toInt(), 20, c.accent, height = 10.dp)
+                    }
+                    com.skarif.kairos.online.SelfUpdate.Status.Installing ->
+                        Text("Installing. Kairos closes for a moment and the notification opens it again.", style = T.small, color = c.text)
+                    is com.skarif.kairos.online.SelfUpdate.Status.Failed -> Text(st.message, style = T.small, color = c.accent)
+                    else -> Text(
+                        if (com.skarif.kairos.online.SelfUpdate.canInstall(ctx)) "Installs right here, over this version. Your music, playlists and settings stay."
+                        else "The first time, Android asks you to let Kairos install updates. After that, updates install in one tap.",
+                        style = T.small, color = c.muted,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (!busy) Pill(if (status is com.skarif.kairos.online.SelfUpdate.Status.Failed) "Try again" else "Update now", {
+                when {
+                    u.apkUrl == null -> uri.openUri(u.url)
+                    !com.skarif.kairos.online.SelfUpdate.canInstall(ctx) -> {
+                        waitingForPermission = true
+                        runCatching { ctx.startActivity(com.skarif.kairos.online.SelfUpdate.permissionIntent(ctx)) }
+                    }
+                    else -> o.installUpdate()
+                }
+            }, selected = true, icon = Ic.DownArrow)
+        },
+        dismissButton = { if (!busy) Pill("Later", { o.skipUpdate(u.version) }) },
+    )
 }

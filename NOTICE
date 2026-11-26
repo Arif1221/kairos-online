@@ -1,0 +1,20 @@
+Kairos Online
+Copyright 2026 SK Arif Hossain
+https://github.com/Arif1221/kairos-online
+
+Kairos Online is free software under the GNU General Public License v3.0 (see LICENSE). It
+has to be: it includes NewPipe Extractor, which is GPL-3.0. You may use, change and share it
+under that licence.
+
+Additional terms under section 7 of the GPL-3.0:
+
+  (b) Attribution. Anything you distribute that is based on this code must keep this NOTICE
+      file and show "Based on Kairos by SK Arif Hossain (github.com/Arif1221/kairos-online)"
+      where the app shows its credits or licences (an "About" or "Open-source licences"
+      screen).
+
+  (e) Names and logos. This licence does not grant use of the names "Kairos" or "Kairos
+      Online" or the Kairos icon. Give your version its own name and icon.
+
+Third-party components keep their own licences; they are listed under "Credits" in
+README.md and in the app (Settings > Credits).

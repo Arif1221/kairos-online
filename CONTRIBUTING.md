@@ -28,4 +28,4 @@ Use the [feature request form](https://github.com/Arif1221/kairos-online/issues/
 - `main`: the offline app (Play Store and GitHub releases).
 - `feature/online-flavor`: the online build, kept separate.
 
-By contributing you agree that your contribution is licensed under the [GPL-3.0](LICENSE).
+By contributing you agree that your contribution is licensed under the [GPL-3.0](LICENSE) with the attribution terms in [NOTICE](NOTICE).

@@ -109,7 +109,7 @@ class MainActivity : ComponentActivity() {
         val start = when {
             onboarded && hasAudioPermission(this) -> "home"
             // Online build: streaming needs no permission, so someone who skipped the library starts on Explore.
-            onboarded && com.skarif.kairos.online.Flavor.online != null -> "discover"
+            onboarded && com.skarif.kairos.online.Flavor.online != null -> "home"
             else -> "onboarding"
         }
         setContent { PlayerRoot(start) }
@@ -164,6 +164,7 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
         val askStorage = androidx.activity.compose.rememberLauncherForActivityResult(
             androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
         ) { granted -> if (!granted) vm.notify("Saving to the phone needs storage access") }
+        if (vm.onlineName != null) com.skarif.kairos.ui.screens.UpdateDialog(vm)
         LaunchedEffect(Unit) { vm.onlineUi.askStorage.collect { askStorage.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) } }
         fun openCollection(key: String) = nav.navigate("collection/" + Uri.encode(key))
         fun openAlbum(id: Long) = openCollection("album:$id")
@@ -300,12 +301,15 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
             ) {
                 screen("onboarding") {
                     OnboardingScreen(vm) {
-                        val next = if (hasAudioPermission(context) || vm.onlineName == null) "home" else "discover"
-                        nav.navigate(next) { popUpTo("onboarding") { inclusive = true } }
+                        nav.navigate("home") { popUpTo("onboarding") { inclusive = true } }
                     }
                 }
                 screen("home") {
-                    HomeScreen(
+                    // Online build: one Home for streaming and the music on this phone.
+                    if (vm.onlineName != null) com.skarif.kairos.ui.screens.ExploreScreen(
+                        vm, onMenu = openMenu, onOpenNowPlaying = openPlayer, onDownloads = { nav.navigate("downloads") },
+                        onOpenCollection = ::openCollection, onSearch = { nav.tab("search") },
+                    ) else HomeScreen(
                         vm, onMenu = openMenu, onSearch = { nav.tab("search") }, onOpenCollection = ::openCollection,
                         onOpenNowPlaying = openPlayer, onPlaylists = { nav.navigate("playlists") },
                         onLibrary = { nav.tab("library") },
@@ -315,14 +319,12 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                     LibraryScreen(
                         vm, onOpenNowPlaying = openPlayer, onSettings = { nav.navigate("settings") },
                         onFolders = { nav.navigate("folders") }, onSort = { tool = Tool.SORT }, onOpenAlbum = ::openAlbum, onOpenCollection = ::openCollection,
+                        onPlaylists = { nav.navigate("playlists") }, onDownloads = { nav.navigate("downloads") },
                     )
                 }
                 screen("stats") { StatsScreen(vm, onMenu = openMenu, onSettings = { nav.navigate("settings") }) }
                 screen("search") {
                     SearchScreen(vm, onMenu = openMenu, onOpenCollection = ::openCollection, onOpenNowPlaying = openPlayer)
-                }
-                screen("discover") {
-                    com.skarif.kairos.ui.screens.ExploreScreen(vm, onMenu = openMenu, onOpenNowPlaying = openPlayer, onDownloads = { nav.navigate("downloads") })
                 }
                 screen("downloads") { com.skarif.kairos.ui.screens.DownloadsScreen(vm, onBack = { nav.popBackStack() }, onOpenNowPlaying = openPlayer) }
                 screen("online/collection/{id}") { e ->
@@ -414,7 +416,7 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     if (song != null) Spacer(Modifier.height(74.dp)) // room for the mini player
-                    Dock(route = route, online = vm.onlineName != null, onTab = { if (it == route) vm.reselectTab(it) else nav.tab(it) }, onNow = openPlayer)
+                    Dock(route = route, onTab = { if (it == route) vm.reselectTab(it) else nav.tab(it) }, onNow = openPlayer)
                 }
             }
 
@@ -427,7 +429,7 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                         // An online song's artist isn't in the library: look them up online instead.
                         if (song?.volume == com.skarif.kairos.data.db.ONLINE_VOLUME && key.startsWith("artist:") &&
                             vm.artistByKey.value[com.skarif.kairos.data.normalize(key.removePrefix("artist:"))] == null
-                        ) onlineNav.search(key.removePrefix("artist:"), com.skarif.kairos.online.OnlineKind.ARTISTS)
+                        ) onlineNav.artist("_", key.removePrefix("artist:"))
                         else openCollection(key)
                     },
                     onSleep = { tool = Tool.SLEEP },
@@ -511,7 +513,7 @@ private fun NavHostController.tab(route: String) = navigate(route) {
 
 /** Design reference: the frosted circle dock with the coloured centre button. */
 @Composable
-private fun Dock(route: String?, online: Boolean, onTab: (String) -> Unit, onNow: () -> Unit, modifier: Modifier = Modifier) {
+private fun Dock(route: String?, onTab: (String) -> Unit, onNow: () -> Unit, modifier: Modifier = Modifier) {
     val c = P.colors
     val idle = if (c.dark) Color(0x1FFFFFFF) else Color(0xB3FFFFFF)
     val dockBg = if (c.dark) Color(0xD93C3C3A) else Color(0xCCC4C7BE)
@@ -530,10 +532,9 @@ private fun Dock(route: String?, online: Boolean, onTab: (String) -> Unit, onNow
             )
         }
         tab("home", Ic.Home, "Home")
-        // Online build: Explore takes Library's place and Library takes Stats' (Stats stays in the menu).
-        if (online) tab("discover", Ic.Discover, "Explore") else tab("library", Ic.Library, "Library")
+        tab("library", Ic.Library, "Library")
         CircleButton(Ic.Play, "Now playing", onNow, size = 60.dp, container = c.accent, content = c.onAccent, iconSize = 22.dp)
-        if (online) tab("library", Ic.Library, "Library") else tab("stats", Ic.Stats, "Statistics")
+        tab("stats", Ic.Stats, "Statistics")
         tab("search", Ic.Search, "Search")
     }
 }

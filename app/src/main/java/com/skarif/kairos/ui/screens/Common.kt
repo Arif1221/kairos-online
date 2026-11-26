@@ -239,9 +239,9 @@ fun SongActionsDialog(
             add(SheetAction("Save to phone (M4A)", Ic.Folder) { vm.onlineUi.saveToPhone(listOf(song)) })
         }
         if (song.volume == com.skarif.kairos.data.db.ONLINE_VOLUME) {
-            // Online songs have no album or artist page in the library; find the artist online instead.
+            // Online songs have no album or artist page in the library: open the artist's online page.
             com.skarif.kairos.data.splitArtists(song.artist).take(3).forEach { a ->
-                add(SheetAction("Find $a", Ic.Person) { onlineNav.search(a, com.skarif.kairos.online.OnlineKind.ARTISTS) })
+                add(SheetAction("Go to $a", Ic.Person) { onlineNav.artist("_", a) })
             }
         } else {
             add(SheetAction("Go to album", Ic.Disc) { onOpenAlbum(song.albumId) })

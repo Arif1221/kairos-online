@@ -112,6 +112,8 @@ fun LibraryScreen(
     onSort: () -> Unit,
     onOpenAlbum: (Long) -> Unit,
     onOpenCollection: (String) -> Unit,
+    onPlaylists: () -> Unit = {},
+    onDownloads: () -> Unit = {},
 ) {
     val c = P.colors
     val menu = LocalCollectionMenu.current
@@ -246,6 +248,19 @@ fun LibraryScreen(
                 }
             }
             item(span = { GridItemSpan(2) }, key = "actions") {
+                // Online build: everything that's yours, streamed or not, one tap away. Inside this
+                // item so the A-Z scroller's item count (HEADER_ITEMS) stays the same.
+                if (vm.onlineName != null) Column {
+                    com.skarif.kairos.ui.components.HintCard(
+                        "library", "Everything that's yours",
+                        listOf(
+                            "The four tiles hold your favourites, playlists, downloads and what you played lately, streamed or not.",
+                            "Songs, Albums, Artists and Genres below are the music files on this phone, including songs you saved to the phone.",
+                        ),
+                        Modifier.padding(top = 18.dp),
+                    )
+                    YoursTiles(vm, onOpenCollection, onPlaylists, onDownloads)
+                }
                 Row(
                     Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -285,12 +300,25 @@ fun LibraryScreen(
                     } else if (shownSongs.isEmpty()) {
                         item(span = { GridItemSpan(2) }) {
                             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                val ctx = androidx.compose.ui.platform.LocalContext.current
+                                val canRead = hasAudioPermission(ctx)
                                 Text(
-                                    if (scan == ScanState.Scanning) "Looking for songs…"
-                                    else "No songs found. Check which folders are included, or copy music to this phone and scan again.",
+                                    when {
+                                        scan == ScanState.Scanning -> "Looking for songs…"
+                                        !canRead -> "Kairos can't see the music on this phone yet. Allow access in Android settings to play your own songs here too."
+                                        else -> "No songs found. Check which folders are included, or copy music to this phone and scan again."
+                                    },
                                     style = T.body, color = c.muted,
                                 )
-                                if (scan != ScanState.Scanning) Pill("Choose folders", onFolders, selected = true, icon = Ic.Folder)
+                                if (!canRead) Pill("Open settings", {
+                                    runCatching {
+                                        ctx.startActivity(
+                                            android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                                                .setData(android.net.Uri.fromParts("package", ctx.packageName, null)),
+                                        )
+                                    }
+                                }, selected = true, icon = Ic.Settings)
+                                else if (scan != ScanState.Scanning) Pill("Choose folders", onFolders, selected = true, icon = Ic.Folder)
                             }
                         }
                     }
@@ -440,6 +468,46 @@ private fun FastScroller(letters: List<Char>, onPick: (Int) -> Unit, modifier: M
         ) {
             Box(Modifier.size(64.dp).clip(CircleShape).background(c.accent), contentAlignment = Alignment.Center) {
                 Text("${letters.getOrElse(active.coerceAtLeast(0)) { ' ' }}", style = T.big.copy(fontSize = 30.sp), color = c.onAccent)
+            }
+        }
+    }
+}
+
+/** Online build: Favourites, Playlists, Downloads and Recently played as tiles at the top of Library. */
+@Composable
+private fun YoursTiles(vm: MainViewModel, onOpenCollection: (String) -> Unit, onPlaylists: () -> Unit, onDownloads: () -> Unit) {
+    val c = P.colors
+    val favs by vm.favorites.collectAsStateWithLifecycle()
+    val playlists by vm.playlists.collectAsStateWithLifecycle()
+    val downloads by vm.onlineUi.downloadedIds.collectAsStateWithLifecycle()
+    val mixes by vm.mixes.collectAsStateWithLifecycle()
+    val recent = mixes.firstOrNull { it.key == "lastplayed" }?.songs?.size ?: 0
+    val tiles = listOf(
+        Triple(Ic.HeartFilled, "Favourites", "${favs.size} songs") to { onOpenCollection("favourites") },
+        Triple(Ic.Queue, "Playlists", "${playlists.size}") to onPlaylists,
+        Triple(Ic.DownArrow, "Downloads", "${downloads.size} songs") to onDownloads,
+        Triple(Ic.Clock, "Recently played", "$recent songs") to { onOpenCollection("lastplayed") },
+    )
+    Column(Modifier.padding(start = 18.dp, end = 18.dp, top = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        tiles.chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                row.forEach { (t, go) ->
+                    val (icon, label, count) = t
+                    Row(
+                        Modifier.weight(1f).cardClick("Open $label", onClick = go)
+                            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)).background(c.card).padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Box(Modifier.size(40.dp).clip(CircleShape).background(c.accent), contentAlignment = Alignment.Center) {
+                            androidx.compose.material3.Icon(icon, null, tint = c.onAccent, modifier = Modifier.size(20.dp))
+                        }
+                        Column {
+                            Text(label, style = T.title.copy(fontSize = 15.sp), color = c.text, maxLines = 1)
+                            Text(count, style = T.small, color = c.muted, maxLines = 1)
+                        }
+                    }
+                }
             }
         }
     }

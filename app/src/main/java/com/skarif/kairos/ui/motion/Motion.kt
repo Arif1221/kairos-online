@@ -66,7 +66,7 @@ object Motion {
     // One set for the whole NavHost; each picks the right motion from where it goes.
 
     /** The dock's tabs. Moving between them is a tab switch, not a push. */
-    val TABS = setOf("home", "library", "stats", "search", "discover")
+    val TABS = setOf("home", "library", "stats", "search")
     private fun AnimatedContentTransitionScope<NavBackStackEntry>.tabSwitch() =
         initialState.destination.route in TABS && targetState.destination.route in TABS
     private val tabFade = tween<Float>(140, easing = LinearEasing)

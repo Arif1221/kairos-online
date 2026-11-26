@@ -162,19 +162,28 @@ fun SearchScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenCollection: (Strin
                     Text(mixedHeadline("Explore " to false, "your music" to true), Modifier.stretchTitle { band.pull }, style = T.h1.copy(fontSize = 34.sp, lineHeight = 38.sp), color = c.text)
                     SearchField(
                         q, vm::setQuery,
-                        if (onlineName != null && searchOnline) "Search $onlineName" else "Songs, artists, albums, genres",
+                        if (onlineName != null) "Songs, artists, albums, playlists" else "Songs, artists, albums, genres",
                         container = chip, height = 52.dp,
                     )
-                    if (onlineName != null) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Pill(onlineName, { vm.onlineUi.setSearchOnline(true) }, selected = searchOnline, icon = Ic.Discover)
-                            Pill("Your library", { vm.onlineUi.setSearchOnline(false) }, selected = !searchOnline, icon = Ic.Music)
+                    // Online build: one row of filters instead of a switch between two searches.
+                    if (onlineName != null && q.isNotEmpty()) {
+                        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            com.skarif.kairos.online.OnlineKind.entries.forEach { k ->
+                                Pill(k.label, { vm.onlineUi.setSearchOnline(true); vm.onlineUi.setKind(k) }, selected = searchOnline && onlineKind == k)
+                            }
+                            Pill("On this phone", { vm.onlineUi.setSearchOnline(false) }, selected = !searchOnline, icon = Ic.Music)
                         }
                     }
-                    if (showOnline) {
-                        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            com.skarif.kairos.online.OnlineKind.entries.forEach { k -> Pill(k.label, { vm.onlineUi.setKind(k) }, selected = onlineKind == k) }
-                        }
+                    if (q.isEmpty() && onlineName != null) {
+                        com.skarif.kairos.ui.components.HintCard(
+                            "search", "One search for everything",
+                            listOf(
+                                "Type to search $onlineName and this phone together; matches on this phone come first.",
+                                "Chips under the box filter: Songs, Videos, Artists, Albums & playlists, or only On this phone.",
+                                "Tap a song to play it with a radio after it. Hold it for more.",
+                            ),
+                            inset = 0.dp,
+                        )
                     }
                     if (q.isEmpty()) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -186,6 +195,22 @@ fun SearchScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenCollection: (Strin
                 }
             }
             if (showOnline) {
+                // Matches on this phone come first, briefly; the chip shows them all.
+                if (results.isNotEmpty() || hits.artists.isNotEmpty() || hits.albums.isNotEmpty()) {
+                    item(span = { GridItemSpan(2) }, key = "phone-h") {
+                        Row(Modifier.fillMaxWidth().padding(end = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.weight(1f)) { SearchSection("On this phone") }
+                            Pill("See all", { vm.onlineUi.setSearchOnline(false) })
+                        }
+                    }
+                    val top = results.take(3)
+                    gridItemsIndexed(top, key = { _, s -> "p" + s.id }, span = { _, _ -> GridItemSpan(2) }, contentType = { _, _ -> "song" }) { i, s ->
+                        SongRow(s, s.id == now.songId, vm, favourite = s.id in favs, onLongClick = { actionsFor = s }) {
+                            vm.play(results, i, "Search"); onOpenNowPlaying()
+                        }
+                    }
+                    item(span = { GridItemSpan(2) }, key = "online-h") { SearchSection(onlineName ?: "Online") }
+                }
                 onlineSearchItems(
                     vm, onlineResults, suggestions, q, now.songId, favs,
                     onSuggestion = { vm.setQuery(it) },

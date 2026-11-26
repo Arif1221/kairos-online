@@ -322,6 +322,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onFolders: () -> Unit,
             }
 
             com.skarif.kairos.ui.components.DeveloperCard()
+            com.skarif.kairos.ui.components.CreditsCard(online = vm.onlineName != null)
 
             Pill("Equalizer", onEqualizer, icon = Ic.Sliders, big = true, modifier = Modifier.fillMaxWidth())
     }
@@ -483,7 +484,7 @@ private fun OnlineAboutCard(vm: MainViewModel) {
         when (val u = update) {
             is com.skarif.kairos.ui.UpdateState.Available -> {
                 Text("Version ${u.version} is available.", style = T.body, color = c.text)
-                Pill("Download ${u.version}", { uri.openUri(u.url) }, selected = true)
+                Pill("Update to ${u.version}", { vm.onlineUi.showUpdate() }, selected = true, icon = Ic.DownArrow)
             }
             com.skarif.kairos.ui.UpdateState.Checking -> Text("Checking for updates...", style = T.small, color = c.muted)
             com.skarif.kairos.ui.UpdateState.UpToDate -> Text("You have the latest version.", style = T.small, color = c.muted)
@@ -493,6 +494,11 @@ private fun OnlineAboutCard(vm: MainViewModel) {
         if (update !is com.skarif.kairos.ui.UpdateState.Available) {
             Pill("Check for updates", { vm.onlineUi.checkForUpdate() }, icon = Ic.Refresh)
         }
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        Pill("Show tips again", {
+            com.skarif.kairos.ui.components.Hints.resetAll(ctx)
+            vm.notify("Tips will show on each screen again")
+        }, icon = Ic.Info)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Pill("Source code", { uri.openUri(repo) }, icon = Ic.Chevron)
             Pill("Privacy", { uri.openUri("$repo/blob/main/PRIVACY.md") }, icon = Ic.Chevron)
