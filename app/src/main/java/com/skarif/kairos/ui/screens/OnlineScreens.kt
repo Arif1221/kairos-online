@@ -44,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
@@ -619,7 +620,13 @@ private fun DownloadAllRow(vm: MainViewModel, songs: List<SongEntity>) {
         have > 0 -> "Download the other ${songs.size - have}"
         else -> "Download all ${songs.size}"
     }
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+    val phone by vm.onlineUi.savedToPhoneIds.collectAsStateWithLifecycle()
+    val onPhone = songs.count { it.id in phone }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
+        if (going == 0) Pill(
+            if (onPhone == songs.size) "On phone" else "Save to phone",
+            { vm.onlineUi.saveToPhone(songs) }, selected = onPhone == songs.size, icon = Ic.Folder,
+        )
         Pill(label, {
             when {
                 going > 0 -> songs.filter { it.id in busy }.forEach(vm.onlineUi::cancelDownload)
@@ -670,4 +677,48 @@ fun DownloadsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenNowPlaying: () 
         }
     }
     actionsFor?.let { s -> SongActionsDialog(vm, s, onOpenAlbum = {}) { actionsFor = null } }
+}
+
+/**
+ * The visible download button for an online song: an arrow, then a ring filling while it
+ * downloads (tap to cancel), then a tick. Reads progress through derivedStateOf, so a list of
+ * these redraws only the row whose number changed.
+ */
+@Composable
+fun DownloadButton(
+    vm: MainViewModel, song: SongEntity, size: Dp = 40.dp,
+    container: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Transparent,
+    content: androidx.compose.ui.graphics.Color = P.colors.muted,
+) {
+    val o = vm.onlineUi
+    val busyMap = o.downloading.collectAsStateWithLifecycle()
+    val doneSet = o.downloadedIds.collectAsStateWithLifecycle()
+    val phoneSet = o.savedToPhoneIds.collectAsStateWithLifecycle()
+    val progress by remember(song.id) { derivedStateOf { busyMap.value[song.id] } }
+    val done by remember(song.id) { derivedStateOf { song.id in doneSet.value || song.id in phoneSet.value } }
+    val accent = P.colors.accent
+    val p = progress
+    Box(contentAlignment = Alignment.Center) {
+        CircleButton(
+            when { p != null -> Ic.Close; done -> Ic.Check; else -> Ic.DownArrow },
+            when { p != null -> "Cancel download"; done -> "Downloaded"; else -> "Download" },
+            {
+                when {
+                    p != null -> o.cancelDownload(song)
+                    done -> vm.notify("On this phone. Hold the song to remove or save it elsewhere.")
+                    else -> o.download(listOf(song))
+                }
+            },
+            modifier = if (p != null) Modifier.drawBehind {
+                val stroke = 2.5.dp.toPx()
+                drawArc(
+                    accent, -90f, 360f * p.coerceAtLeast(0.03f), false,
+                    topLeft = androidx.compose.ui.geometry.Offset(stroke / 2, stroke / 2),
+                    size = androidx.compose.ui.geometry.Size(this.size.width - stroke, this.size.height - stroke),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+                )
+            } else Modifier,
+            size = size, container = container, content = if (done && p == null) accent else content, iconSize = size * 0.45f,
+        )
+    }
 }

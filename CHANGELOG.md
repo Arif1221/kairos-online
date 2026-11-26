@@ -1,5 +1,10 @@
 # Changelog
 
+## Online 0.9.1.3
+- Save to phone: online songs, albums and playlists as M4A files in Music/Kairos, tagged with title, artist and cover
+- Download buttons on every online song row and in the player, with progress
+- Settings > Downloads & storage: choose what the Download button does, and how much room recently streamed songs may take (256 MB to 4 GB)
+
 ## Online 0.9.1.2
 - Download online songs (hold a song, then Download) and whole albums, playlists and artists (Download all); downloads play offline and are never evicted
 - Downloads page (menu and Explore), with storage and Remove all in Settings > Streaming

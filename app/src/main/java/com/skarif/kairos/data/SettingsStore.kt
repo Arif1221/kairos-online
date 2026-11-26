@@ -83,6 +83,10 @@ data class Settings(
     val dataSaverOnMobile: Boolean = true,
     /** Online flavor only: online search starts on Videos instead of Songs. */
     val searchVideosFirst: Boolean = false,
+    /** Online flavor only: the Download button saves an M4A file to Music/Kairos instead of keeping it in the app. */
+    val downloadToPhone: Boolean = false,
+    /** Online flavor only: room for recently streamed songs, in MB. */
+    val streamCacheMb: Int = 1024,
 ) {
     val minDurationMs: Long get() = if (skipShortFiles) 30_000L else 0L
 }
@@ -126,6 +130,8 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
         val streamQuality = stringPreferencesKey("stream_quality")
         val dataSaver = booleanPreferencesKey("data_saver_mobile")
         val videosFirst = booleanPreferencesKey("search_videos_first")
+        val downloadToPhone = booleanPreferencesKey("download_to_phone")
+        val streamCacheMb = androidx.datastore.preferences.core.intPreferencesKey("stream_cache_mb")
     }
 
     val settings: StateFlow<Settings> = ds.data
@@ -175,6 +181,8 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
             streamQuality = enumOr(p[K.streamQuality], d.streamQuality),
             dataSaverOnMobile = p[K.dataSaver] ?: d.dataSaverOnMobile,
             searchVideosFirst = p[K.videosFirst] ?: d.searchVideosFirst,
+            downloadToPhone = p[K.downloadToPhone] ?: d.downloadToPhone,
+            streamCacheMb = p[K.streamCacheMb] ?: d.streamCacheMb,
         )
     }
 
@@ -212,6 +220,8 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
         p[K.streamQuality] = s.streamQuality.name
         p[K.dataSaver] = s.dataSaverOnMobile
         p[K.videosFirst] = s.searchVideosFirst
+        p[K.downloadToPhone] = s.downloadToPhone
+        p[K.streamCacheMb] = s.streamCacheMb
     }
 
     private inline fun <reified E : Enum<E>> enumOr(name: String?, default: E): E =

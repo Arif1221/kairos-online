@@ -251,6 +251,12 @@ fun NowPlayingPane(
                     )
                 }
             }
+            // Online songs: download next to the heart, where it's seen.
+            if (s.volume == com.skarif.kairos.data.db.ONLINE_VOLUME && vm.onlineName != null) {
+                Box(Modifier.align(Alignment.BottomEnd).padding(end = 108.dp, bottom = 10.dp)) {
+                    DownloadButton(vm, s, 56.dp, container = c.card, content = c.text)
+                }
+            }
             CircleButton(
                 if (liked) Ic.HeartFilled else Ic.Heart,
                 if (liked) "Remove from favourites" else "Add to favourites",

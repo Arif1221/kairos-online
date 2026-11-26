@@ -89,7 +89,8 @@ This repo keeps two Gradle flavors so the offline repo's code merges in cleanly:
 - **Online radio**: tapping an online song plays it with its YouTube mix after it, and autoplay continues an online queue the same way. Local songs keep the library radio.
 - Videos play as **audio only**; video streams are never downloaded. Shorts are skipped.
 - **Settings > Streaming**: Data saver (~50 kbps), Normal (~128 kbps) or High (~160 kbps Opus), plus "Data saver on mobile data" (default on), and an **Online check** that tries search, radio and playback once and shows what works on your network.
-- **Downloads**: hold an online song and tap **Download**, or use **Download all** on an album, playlist or artist page. Downloads are kept until you remove them (separate from the stream cache) and live on the **Downloads** page and Explore.
+- **Save to phone**: online songs, albums and playlists as **M4A files in Music/Kairos**, tagged with title, artist and cover, so any app can play them.
+- **Downloads**: tap the download button on any online song (or in the player), or hold a song and tap **Download**, or use **Download all** on an album, playlist or artist page. Downloads are kept until you remove them (separate from the stream cache) and live on the **Downloads** page and Explore.
 - **Works offline after streaming**: played songs are kept in a 1 GB stream cache (oldest go first) and replay with no connection. Explore shows **Saved on this phone** when you're offline.
 - **Synced lyrics** for online songs from [LRCLIB](https://lrclib.net) (free, no key), with the same download panel as local songs.
 - **Reliability**: YouTube requests are retried once; a song that fails to load is skipped (up to 3 in a row) instead of stopping playback. Search and Explore show an offline state and reload when the connection returns.

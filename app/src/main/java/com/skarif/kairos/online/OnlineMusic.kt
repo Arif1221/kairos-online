@@ -123,6 +123,15 @@ interface OnlineMusic {
     /** Deletes a download, finished or partial, by video id. Call off the main thread. */
     fun removeDownload(context: Context, videoId: String)
 
+    /** How much room recently streamed songs may take; trims at once if it shrank. Call off the main thread. */
+    fun setCacheLimit(context: Context, bytes: Long)
+
+    /**
+     * Fetches the song as an M4A (AAC) file into [into], untagged, for saving to the phone.
+     * [progress] runs on a background thread (0..1). Cancelling the coroutine stops it.
+     */
+    suspend fun fetchM4a(song: SongEntity, into: java.io.File, progress: (Float) -> Unit)
+
     /**
      * Plays both local files and this source's Uris. [quality] is asked each time a stream is
      * opened, so a settings or network change applies from the next song.

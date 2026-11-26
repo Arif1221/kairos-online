@@ -160,6 +160,11 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
         val song by vm.currentSong.collectAsStateWithLifecycle()
         // MediaStore may have changed since last time; a rescan is cheap.
         LaunchedEffect(Unit) { if (hasAudioPermission(context)) vm.scanNow() }
+        // Online build on Android 9: saving a song to Music/Kairos needs the storage permission.
+        val askStorage = androidx.activity.compose.rememberLauncherForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+        ) { granted -> if (!granted) vm.notify("Saving to the phone needs storage access") }
+        LaunchedEffect(Unit) { vm.onlineUi.askStorage.collect { askStorage.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) } }
         fun openCollection(key: String) = nav.navigate("collection/" + Uri.encode(key))
         fun openAlbum(id: Long) = openCollection("album:$id")
         val openMenu = { menuOpen = true }

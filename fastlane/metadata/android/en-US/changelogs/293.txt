@@ -1,0 +1,3 @@
+• Save online songs to the phone as M4A files with title, artist and cover
+• Download buttons on every online song and in the player
+• Settings > Downloads & storage: what Download does, cache size limit

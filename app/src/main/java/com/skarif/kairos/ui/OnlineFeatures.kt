@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import com.skarif.kairos.AppContainer
+import com.skarif.kairos.data.PhoneSaver
 import com.skarif.kairos.data.db.ONLINE_VOLUME
 import com.skarif.kairos.data.db.SongEntity
 import com.skarif.kairos.data.db.isOnline
@@ -120,6 +121,8 @@ class OnlineFeatures(
     private val seen: (List<SongEntity>) -> Unit,
     /** Shows a short message (download finished or failed). */
     private val notify: (String) -> Unit = {},
+    /** A file was saved to Music/Kairos: rescan so it shows in the Library. */
+    private val onSavedToPhone: () -> Unit = {},
 ) {
     private val source = Flavor.online
 
@@ -200,7 +203,23 @@ class OnlineFeatures(
     private val _downloadBytes = MutableStateFlow(0L)
     val downloadBytes: StateFlow<Long> = _downloadBytes.asStateFlow()
 
-    private val queue = Channel<SongEntity>(Channel.UNLIMITED)
+    /** Video ids saved to the phone as files (kept across launches). */
+    private val phonePrefs = app.getSharedPreferences("saved_to_phone", android.content.Context.MODE_PRIVATE)
+    private val _savedToPhone = MutableStateFlow(phonePrefs.getStringSet("ids", emptySet()).orEmpty())
+    val savedToPhoneIds: StateFlow<Set<Long>> = _savedToPhone.map { ids -> ids.mapTo(HashSet(), ::onlineId) }
+        .stateIn(scope, SharingStarted.Eagerly, emptySet())
+
+    private fun markSavedToPhone(videoId: String) {
+        _savedToPhone.update { it + videoId }
+        phonePrefs.edit().putStringSet("ids", _savedToPhone.value).apply()
+    }
+
+    /** Fires when Android 9 needs the storage permission before saving files; MainActivity asks for it. */
+    private val _askStorage = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val askStorage: kotlinx.coroutines.flow.SharedFlow<Unit> = _askStorage
+
+    private class Task(val song: SongEntity, val toPhone: Boolean)
+    private val queue = Channel<Task>(Channel.UNLIMITED)
     private val jobs = java.util.concurrent.ConcurrentHashMap<Long, Job>()
 
     private fun refreshDownloads() {
@@ -211,19 +230,39 @@ class OnlineFeatures(
         }
     }
 
-    /** Queues [songs] for download, one at a time; already downloaded or queued ones are skipped. */
-    fun download(songs: List<SongEntity>) {
+    /**
+     * The Download button: keeps [songs] in the app, or saves them to the phone as files when
+     * Settings says so. Queued one at a time; songs already done or queued are skipped.
+     */
+    fun download(songs: List<SongEntity>) = enqueue(songs, ct.settings.settings.value.downloadToPhone)
+
+    /** Saves [songs] as M4A files in Music/Kairos, whatever the Download setting is. */
+    fun saveToPhone(songs: List<SongEntity>) = enqueue(songs, toPhone = true)
+
+    private fun enqueue(songs: List<SongEntity>, toPhone: Boolean) {
         if (source == null) return
-        val todo = songs.filter { it.isOnline && it.fileName !in _downloaded.value && it.id !in _downloading.value }.distinctBy { it.id }
-        if (todo.isEmpty()) return
+        val done = if (toPhone) _savedToPhone.value else _downloaded.value
+        val todo = songs.filter { it.isOnline && it.fileName !in done && it.id !in _downloading.value }.distinctBy { it.id }
+        if (todo.isEmpty()) {
+            if (songs.isNotEmpty()) notify(if (toPhone) "Already saved to Music/${PhoneSaver.FOLDER}" else "Already downloaded")
+            return
+        }
         if (!networkUp.value) { notify("Downloading needs a connection"); return }
+        if (toPhone && PhoneSaver.needsPermission &&
+            app.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            _askStorage.tryEmit(Unit)
+            notify("Allow storage access, then try again")
+            return
+        }
         _downloading.update { m -> m + todo.associate { it.id to 0f } }
         scope.launch {
             // Downloads need their rows, so they show up offline under Downloads.
-            ct.db.songs().upsertAll(todo)
-            todo.forEach { queue.send(it) }
+            if (!toPhone) ct.db.songs().upsertAll(todo)
+            todo.forEach { queue.send(Task(it, toPhone)) }
         }
-        notify(if (todo.size == 1) "Downloading ${todo[0].title}" else "Downloading ${todo.size} songs")
+        val what = if (toPhone) "Saving" else "Downloading"
+        notify(if (todo.size == 1) "$what ${todo[0].title}" else "$what ${todo.size} songs")
     }
 
     /** Stops a download (or takes it out of the queue) and deletes what was saved of it. */
@@ -255,18 +294,31 @@ class OnlineFeatures(
 
     private suspend fun runDownloads() {
         val s = source ?: return
-        for (song in queue) {
+        for (task in queue) {
+            val song = task.song
             if (song.id !in _downloading.value) continue // cancelled while waiting
             var failed: Exception? = null
             val job = scope.launch {
                 var shown = 0f
+                // Every 2%: enough to look alive, few enough not to redraw lists constantly.
+                val report = { p: Float ->
+                    if (p - shown >= 0.02f || p >= 1f) {
+                        shown = p
+                        _downloading.update { if (song.id in it) it + (song.id to p) else it }
+                    }
+                }
                 try {
-                    s.download(app, song, ct.settings.settings.value.streamQuality) { p ->
-                        // Every 2%: enough to look alive, few enough not to redraw lists constantly.
-                        if (p - shown >= 0.02f || p >= 1f) {
-                            shown = p
-                            _downloading.update { if (song.id in it) it + (song.id to p) else it }
+                    if (task.toPhone) {
+                        val tmp = File(app.cacheDir, "save/${song.fileName}.m4a").apply { parentFile?.mkdirs() }
+                        try {
+                            s.fetchM4a(song, tmp) { p -> report(p * 0.95f) }
+                            PhoneSaver.save(app, song, tmp, ct.artwork.load(song, 720))
+                            markSavedToPhone(song.fileName)
+                        } finally {
+                            tmp.delete()
                         }
+                    } else {
+                        s.download(app, song, ct.settings.settings.value.streamQuality, report)
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -284,8 +336,10 @@ class OnlineFeatures(
             when {
                 wasCancelled -> {}
                 failed != null -> notify(if (networkUp.value) "Couldn't download ${song.title}" else "Download paused: you're offline")
+                task.toPhone && _downloading.value.isEmpty() -> notify("Saved to Music/${PhoneSaver.FOLDER}")
                 _downloading.value.isEmpty() -> notify("Downloaded ${song.title}")
             }
+            if (task.toPhone && failed == null && !wasCancelled && _downloading.value.isEmpty()) onSavedToPhone()
         }
     }
 
@@ -628,6 +682,13 @@ class OnlineFeatures(
     init {
         if (source != null) {
             refreshDownloads()
+            scope.launch {
+                ct.settings.settings.map { it.streamCacheMb }.distinctUntilChanged().collect { mb ->
+                    withContext(Dispatchers.IO) { source.setCacheLimit(app, mb * 1_048_576L) }
+                    refreshCacheSize()
+                    cacheChanged.value++
+                }
+            }
             scope.launch { runDownloads() }
             // One quiet update check per launch, once there is a connection.
             scope.launch {

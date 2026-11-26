@@ -340,6 +340,17 @@ internal object YouTubeMusic : OnlineMusic {
         StreamQuality.entries.forEach { saved.removeResource(cacheKey(videoId, it)) }
     }
 
+    override fun setCacheLimit(context: Context, bytes: Long) = StreamCache.setLimit(context, bytes)
+
+    override suspend fun fetchM4a(song: SongEntity, into: java.io.File, progress: (Float) -> Unit) = withContext(Dispatchers.IO) {
+        init
+        val info = retry { StreamInfo.getInfo(ServiceList.YouTube, watchUrl(song.fileName)) }
+        val stream = info.audioStreams
+            .filter { it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP && it.isUrl && it.format == org.schabi.newpipe.extractor.MediaFormat.M4A }
+            .maxByOrNull(::kbps) ?: throw IOException("No M4A audio for ${song.fileName}")
+        NewPipeDownloader.downloadTo(stream.content, into, progress)
+    }
+
     override suspend fun download(context: Context, song: SongEntity, quality: StreamQuality, progress: (Float) -> Unit) {
         withContext(Dispatchers.IO) {
             val app = context.applicationContext

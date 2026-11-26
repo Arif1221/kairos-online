@@ -154,6 +154,9 @@ private fun SongRowContent(song: SongEntity, playing: Boolean, vm: MainViewModel
             Text(song.artist, style = T.small, color = if (playing) fg.copy(alpha = 0.8f) else c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text(formatTime(song.durationMs), style = T.num, color = if (playing) fg else c.muted)
+        if (song.volume == com.skarif.kairos.data.db.ONLINE_VOLUME && vm.onlineName != null) {
+            DownloadButton(vm, song, 36.dp, content = if (playing) fg else c.muted)
+        }
     }
 }
 
@@ -190,8 +193,11 @@ fun SongActionsDialog(
     val online = song.volume == com.skarif.kairos.data.db.ONLINE_VOLUME && vm.onlineName != null
     val downloaded = vm.onlineUi.downloadedIds.collectAsStateWithLifecycle().value
     val downloading = vm.onlineUi.downloading.collectAsStateWithLifecycle().value
+    val onPhone = song.id in vm.onlineUi.savedToPhoneIds.collectAsStateWithLifecycle().value
     val downloadAction = when {
         !online -> null
+        onPhone && song.id !in downloaded && song.id !in downloading ->
+            SheetAction("On phone", Ic.Check, selected = true) { vm.notify("Saved in Music/${com.skarif.kairos.data.PhoneSaver.FOLDER}") }
         song.id in downloaded -> SheetAction("Downloaded", Ic.Check, selected = true) {
             vm.onlineUi.removeDownload(song)
             vm.notify("Removed the download of ${song.title}")
@@ -229,6 +235,9 @@ fun SongActionsDialog(
         add(addToPlaylistAction(vm, playlists, listOf(song.id)))
         // Online songs: Download takes Share's quick slot (in the queue menu it goes here instead).
         if (downloadAction != null) add(if (queueIndex == null) shareAction else downloadAction)
+        if (online && !onPhone && song.id !in downloading) {
+            add(SheetAction("Save to phone (M4A)", Ic.Folder) { vm.onlineUi.saveToPhone(listOf(song)) })
+        }
         if (song.volume == com.skarif.kairos.data.db.ONLINE_VOLUME) {
             // Online songs have no album or artist page in the library; find the artist online instead.
             com.skarif.kairos.data.splitArtists(song.artist).take(3).forEach { a ->

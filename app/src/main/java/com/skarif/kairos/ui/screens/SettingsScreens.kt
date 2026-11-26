@@ -240,7 +240,10 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onFolders: () -> Unit,
                 if (s.tasteExcluded.isNotEmpty()) Pill("Use them all again", vm::clearTasteExclusions, icon = Ic.Refresh)
             }
 
-            vm.onlineName?.let { source -> StreamingCard(vm, source) }
+            vm.onlineName?.let { source ->
+                StreamingCard(vm, source)
+                DownloadsCard(vm)
+            }
 
             Card(Modifier) {
                 Text("Library", style = T.h2, color = c.text)
@@ -370,7 +373,6 @@ fun FoldersScreen(vm: MainViewModel, onBack: () -> Unit) {
 private fun StreamingCard(vm: MainViewModel, source: String) {
     val c = P.colors
     val s by vm.settings.collectAsStateWithLifecycle()
-    val cacheBytes by vm.onlineUi.cacheBytes.collectAsStateWithLifecycle()
     val checks by vm.onlineUi.checks.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { vm.onlineUi.refreshCacheSize() }
     Card(Modifier) {
@@ -386,26 +388,6 @@ private fun StreamingCard(vm: MainViewModel, source: String) {
         ToggleRow(
             "Data saver on mobile data", s.dataSaverOnMobile, { v -> vm.updateSettings { it.copy(dataSaverOnMobile = v) } },
             "Uses ${com.skarif.kairos.data.StreamQuality.LOW.label} quality when you're not on Wi-Fi",
-        )
-        Text(
-            "Recently streamed, kept for offline: ${cacheBytes / 1_048_576} MB of 1024 MB; the oldest go first.",
-            style = T.small, color = c.muted,
-        )
-        Pill("Clear saved songs", { vm.onlineUi.clearCache() }, icon = Ic.Trash)
-        val dlBytes by vm.onlineUi.downloadBytes.collectAsStateWithLifecycle()
-        val dlCount = vm.onlineUi.downloadedIds.collectAsStateWithLifecycle().value.size
-        Text(
-            if (dlCount == 0) "Downloads: none. Hold an online song and tap Download to keep it on this phone."
-            else "Downloads: $dlCount songs, ${dlBytes / 1_048_576} MB. Clearing saved songs above doesn't touch them.",
-            style = T.small, color = c.muted,
-        )
-        var confirmRemove by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-        if (dlCount > 0) Pill("Remove all downloads", { confirmRemove = true }, icon = Ic.Trash)
-        if (confirmRemove) ConfirmDialog(
-            "Remove all downloads?",
-            "$dlCount songs will need a connection again. Favourites and playlists keep them.",
-            confirm = "Remove", dismiss = "Keep",
-            onConfirm = { vm.onlineUi.removeAllDownloads(); confirmRemove = false }, onDismiss = { confirmRemove = false },
         )
         Text("Online check", style = T.title, color = c.text)
         Text("Tries search, radio and playback once, to see what works on your network.", style = T.small, color = c.muted)
@@ -425,6 +407,63 @@ private fun StreamingCard(vm: MainViewModel, source: String) {
         }
         Pill(if (checks == null) "Run check" else "Run again", { vm.onlineUi.runChecks() }, icon = Ic.Refresh)
     }
+}
+
+/** Online build: what Download does, the downloads, and how much room streaming may use. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DownloadsCard(vm: MainViewModel) {
+    val c = P.colors
+    val s by vm.settings.collectAsStateWithLifecycle()
+    val cacheBytes by vm.onlineUi.cacheBytes.collectAsStateWithLifecycle()
+    val dlBytes by vm.onlineUi.downloadBytes.collectAsStateWithLifecycle()
+    val dlCount = vm.onlineUi.downloadedIds.collectAsStateWithLifecycle().value.size
+    val onPhone = vm.onlineUi.savedToPhoneIds.collectAsStateWithLifecycle().value.size
+    var confirmRemove by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    LaunchedEffect(Unit) { vm.onlineUi.refreshCacheSize() }
+    Card(Modifier) {
+        Text("Downloads & storage", style = T.h2, color = c.text)
+
+        Text("Download button saves", style = T.title, color = c.text)
+        Segmented(listOf("In the app", "To the phone"), if (s.downloadToPhone) 1 else 0, { i ->
+            vm.updateSettings { it.copy(downloadToPhone = i == 1) }
+        })
+        Text(
+            if (s.downloadToPhone) "Saves an M4A file with title, artist and cover in Music/${com.skarif.kairos.data.PhoneSaver.FOLDER}. " +
+                "Other apps can play it, and it shows in your Library. Delete it from a file manager."
+            else "Kept inside Kairos at your streaming quality; only Kairos plays it. Hold a song for Save to phone when you want a file.",
+            style = T.small, color = c.muted,
+        )
+
+        Text("In the app", style = T.title, color = c.text)
+        Text(
+            if (dlCount == 0) "Nothing downloaded yet."
+            else "$dlCount songs, ${dlBytes / 1_048_576} MB. Kept until you remove them.",
+            style = T.small, color = c.muted,
+        )
+        if (dlCount > 0) Pill("Remove all downloads", { confirmRemove = true }, icon = Ic.Trash)
+        if (onPhone > 0) Text("Saved to the phone: $onPhone songs in Music/${com.skarif.kairos.data.PhoneSaver.FOLDER}.", style = T.small, color = c.muted)
+
+        Text("Recently streamed", style = T.title, color = c.text)
+        val sizes = listOf(256, 512, 1024, 2048, 4096)
+        // Five sizes don't fit one segmented row on narrow phones; pills wrap.
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            sizes.forEach { mb ->
+                Pill(if (mb < 1024) "$mb MB" else "${mb / 1024} GB", { vm.updateSettings { it.copy(streamCacheMb = mb) } }, selected = s.streamCacheMb == mb)
+            }
+        }
+        Text(
+            "Songs you stream are kept so they replay without data; the oldest go first. Using ${cacheBytes / 1_048_576} MB now.",
+            style = T.small, color = c.muted,
+        )
+        Pill("Clear recently streamed", { vm.onlineUi.clearCache() }, icon = Ic.Trash)
+    }
+    if (confirmRemove) ConfirmDialog(
+        "Remove all downloads?",
+        "$dlCount songs will need a connection again. Favourites and playlists keep them. Files saved to the phone stay.",
+        confirm = "Remove", dismiss = "Keep",
+        onConfirm = { vm.onlineUi.removeAllDownloads(); confirmRemove = false }, onDismiss = { confirmRemove = false },
+    )
 }
 
 /** Online build: version, update check (it ships only on GitHub, so nothing else tells users), source and privacy. */

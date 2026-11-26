@@ -9,7 +9,10 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.cache.ContentMetadata
 import androidx.media3.datasource.cache.Cache
-import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.common.C
+import androidx.media3.datasource.cache.CacheEvictor
+import androidx.media3.datasource.cache.CacheSpan
+import java.util.TreeSet
 import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import java.io.File
@@ -21,7 +24,15 @@ import java.io.File
  */
 @OptIn(UnstableApi::class)
 internal object StreamCache {
-    private const val MAX_BYTES = 1024L * 1024 * 1024 // 1 GB
+    /** Set from Settings > Downloads & storage; applies at once (trimming if it shrank). */
+    @Volatile var maxBytes = 1024L * 1024 * 1024
+    private val evictor = AdjustableLruEvictor { maxBytes }
+
+    fun setLimit(context: Context, bytes: Long) {
+        maxBytes = bytes
+        val cache = get(context)
+        synchronized(cache) { evictor.trim(cache) } // SimpleCache's own lock, as its callbacks hold
+    }
 
     @Volatile private var db: StandaloneDatabaseProvider? = null
     @Volatile private var streams: SimpleCache? = null
@@ -33,7 +44,7 @@ internal object StreamCache {
     }
 
     fun get(context: Context): SimpleCache = streams ?: synchronized(this) {
-        streams ?: SimpleCache(File(context.applicationContext.cacheDir, "streams"), LeastRecentlyUsedCacheEvictor(MAX_BYTES), db(context))
+        streams ?: SimpleCache(File(context.applicationContext.cacheDir, "streams"), evictor, db(context))
             .also { streams = it }
     }
 
@@ -53,6 +64,44 @@ internal object StreamCache {
     fun clear(context: Context) {
         val cache = get(context)
         cache.keys.toList().forEach { cache.removeResource(it) }
+    }
+}
+
+/**
+ * Least recently played go first, like Media3's LeastRecentlyUsedCacheEvictor, but the limit
+ * can change while the app runs (that one fixes it at construction).
+ */
+@OptIn(UnstableApi::class)
+internal class AdjustableLruEvictor(private val max: () -> Long) : CacheEvictor {
+    private val spans = TreeSet<CacheSpan>(compareBy<CacheSpan> { it.lastTouchTimestamp }.thenBy { it })
+    private var size = 0L
+
+    override fun requiresCacheSpanTouches() = true
+    override fun onCacheInitialized() {}
+
+    override fun onStartFile(cache: Cache, key: String, position: Long, length: Long) {
+        if (length != C.LENGTH_UNSET.toLong()) evict(cache, length)
+    }
+
+    override fun onSpanAdded(cache: Cache, span: CacheSpan) {
+        spans.add(span)
+        size += span.length
+        evict(cache, 0)
+    }
+
+    override fun onSpanRemoved(cache: Cache, span: CacheSpan) {
+        if (spans.remove(span)) size -= span.length
+    }
+
+    override fun onSpanTouched(cache: Cache, oldSpan: CacheSpan, newSpan: CacheSpan) {
+        onSpanRemoved(cache, oldSpan)
+        onSpanAdded(cache, newSpan)
+    }
+
+    fun trim(cache: Cache) = evict(cache, 0)
+
+    private fun evict(cache: Cache, required: Long) {
+        while (size + required > max() && spans.isNotEmpty()) cache.removeSpan(spans.first())
     }
 }
 

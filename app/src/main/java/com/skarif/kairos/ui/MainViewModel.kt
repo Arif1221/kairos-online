@@ -706,7 +706,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val seenOnline = java.util.concurrent.ConcurrentHashMap<Long, SongEntity>()
 
     /** Explore, online search, network state and the stream cache; inert in the play build. */
-    val onlineUi = OnlineFeatures(app, ct, viewModelScope, seen = { l -> l.forEach { seenOnline[it.id] = it } }, notify = { notify(it) })
+    val onlineUi = OnlineFeatures(app, ct, viewModelScope, seen = { l -> l.forEach { seenOnline[it.id] = it } },
+        notify = { notify(it) },
+        onSavedToPhone = { if (com.skarif.kairos.ui.screens.hasAudioPermission(app)) scanNow() },
+    )
 
     /** Online songs only exist in Room once kept; do that before they are played or referenced. */
     private fun keepOnline(songs: List<SongEntity>) {
