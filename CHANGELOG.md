@@ -1,5 +1,8 @@
 # Changelog
 
+## Online 0.9.1.8
+- Fix: a crash during the back gesture on Android 16+ ("This input is not added to any dispatcher")
+
 ## Online 0.9.1.7
 - Import from Spotify: paste a public playlist or album link (no login); songs are matched on this phone first, then on YouTube Music
 - Library's Songs and Artists include songs downloaded in the app, alongside the files on this phone

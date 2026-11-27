@@ -1,0 +1,1 @@
+• Fix: crash during the back gesture on newer Android
