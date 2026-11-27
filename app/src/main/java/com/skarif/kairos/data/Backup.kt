@@ -4,7 +4,11 @@ import com.skarif.kairos.data.db.FavoriteEntity
 import com.skarif.kairos.data.db.LyricsOffsetEntity
 import com.skarif.kairos.data.db.PlayEventEntity
 import com.skarif.kairos.data.db.PlayerDatabase
+import com.skarif.kairos.data.db.ONLINE_VOLUME
 import com.skarif.kairos.data.db.SongEntity
+import com.skarif.kairos.data.db.isOnline
+import com.skarif.kairos.online.Flavor
+import com.skarif.kairos.online.onlineId
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -14,7 +18,10 @@ import org.json.JSONObject
  *
  * Songs are stored by path, title, artist and length, never by Android's id, which changes on
  * a new phone or after reinstalling. On restore each one is looked up with [SongMatcher].
- * Restoring merges: nothing you already have is deleted, and restoring twice adds nothing twice.
+ * Online songs are stored with their YouTube id, album and cover, because a new phone or a fresh
+ * install has no row for them: restore recreates the row, so their favourites, playlists and history
+ * come back too. Restoring merges: nothing you already have is deleted, and restoring twice adds
+ * nothing twice.
  */
 class Backup(private val db: PlayerDatabase, private val settings: SettingsStore) {
 
@@ -28,7 +35,10 @@ class Backup(private val db: PlayerDatabase, private val settings: SettingsStore
         fun ref(id: Long): Int? {
             index[id]?.let { return it }
             val s = byId[id] ?: return null
-            songArr.put(JSONArray().put(s.folder + s.fileName).put(s.title).put(s.artist).put(s.durationMs))
+            val entry = JSONArray().put(s.folder + s.fileName).put(s.title).put(s.artist).put(s.durationMs)
+            // Online songs: the path is the YouTube id; keep what's needed to rebuild the row on another phone.
+            if (s.isOnline) entry.put(ONLINE_VOLUME).put(s.album).put(s.artUrl ?: "")
+            songArr.put(entry)
             index[id] = songArr.length() - 1
             return index[id]
         }
@@ -64,6 +74,9 @@ class Backup(private val db: PlayerDatabase, private val settings: SettingsStore
             .put("streamQuality", s.streamQuality.name).put("dataSaverOnMobile", s.dataSaverOnMobile)
             .put("downloadMode", s.downloadMode.name).put("rememberDownloadChoice", s.rememberDownloadChoice)
             .put("streamCacheMb", s.streamCacheMb)
+            .put("glow", s.backgroundGlow.toDouble()).put("videoQuality", s.videoQuality.name)
+            .put("videoSubtitles", s.videoSubtitles).put("miniLyrics", s.miniLyrics)
+            .put("searchVideosFirst", s.searchVideosFirst)
         return JSONObject()
             .put("app", "Kairos").put("version", 1).put("createdAt", System.currentTimeMillis())
             .put("songs", songArr).put("favourites", favs).put("playlists", lists).put("plays", plays).put("lyricsOffsets", offsets)
@@ -77,10 +90,24 @@ class Backup(private val db: PlayerDatabase, private val settings: SettingsStore
         val matcher = SongMatcher(songs)
         val arr = root.getJSONArray("songs")
         var missing = 0
+        val rebuilt = ArrayList<SongEntity>()
         val local = (0 until arr.length()).map { i ->
             val a = arr.getJSONArray(i)
-            matcher.find(a.getString(0), a.getString(1), a.getString(2), a.optLong(3)).also { if (it == null) missing++ }
+            if (a.optString(4) == ONLINE_VOLUME) {
+                // An online song: its id is a hash of the YouTube id, so it is the same on every phone.
+                val videoId = a.getString(0)
+                if (Flavor.online == null || videoId.isBlank()) { missing++; null }
+                else SongEntity(
+                    id = onlineId(videoId), title = a.getString(1), artist = a.getString(2), album = a.optString(5),
+                    albumId = 0, durationMs = a.optLong(3), track = 0, year = 0, folder = "", fileName = videoId,
+                    volume = ONLINE_VOLUME, mimeType = "audio/opus", sizeBytes = 0, dateAddedSec = System.currentTimeMillis() / 1000,
+                    bitrate = 0, artUrl = a.optString(6).takeIf { it.isNotEmpty() && it != "null" },
+                ).also { rebuilt += it }
+            } else matcher.find(a.getString(0), a.getString(1), a.getString(2), a.optLong(3)).also { if (it == null) missing++ }
         }
+        // Only the online songs this phone doesn't have yet; the ones it has keep their row.
+        val known = songs.mapTo(HashSet()) { it.id }
+        rebuilt.filter { it.id !in known }.distinctBy { it.id }.let { if (it.isNotEmpty()) db.songs().upsertAll(it) }
         fun song(i: Int) = local.getOrNull(i)
 
         // Favourites.
@@ -179,6 +206,11 @@ class Backup(private val db: PlayerDatabase, private val settings: SettingsStore
                     downloadMode = enum("downloadMode", DownloadMode.entries.toTypedArray(), n.downloadMode),
                     rememberDownloadChoice = p.optBoolean("rememberDownloadChoice", n.rememberDownloadChoice),
                     streamCacheMb = p.optInt("streamCacheMb", n.streamCacheMb).coerceIn(256, 10240),
+                    backgroundGlow = p.optDouble("glow", n.backgroundGlow.toDouble()).toFloat().coerceIn(0f, 1f),
+                    videoQuality = enum("videoQuality", VideoQuality.entries.toTypedArray(), n.videoQuality),
+                    videoSubtitles = p.optBoolean("videoSubtitles", n.videoSubtitles),
+                    miniLyrics = p.optBoolean("miniLyrics", n.miniLyrics),
+                    searchVideosFirst = p.optBoolean("searchVideosFirst", n.searchVideosFirst),
                 )
             }
             n

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -89,13 +90,27 @@ fun PlayerMenu(
     val ctx = LocalContext.current
     var speed by remember { mutableStateOf(false) }
     var info by remember { mutableStateOf(false) }
+    var quality by remember { mutableStateOf(false) }
+    val onlineNav = LocalOnlineNav.current
+    // Always reachable for online songs, from the full player or the mini player's long-press menu.
+    val findVideo = if (vm.onlineName != null && song.volume == com.skarif.kairos.data.db.ONLINE_VOLUME) {
+        listOf(SheetAction("Find music video", Ic.Video) {
+            onlineNav.search("${song.title} ${song.artist}".trim(), com.skarif.kairos.online.OnlineKind.VIDEOS)
+        })
+    } else emptyList()
+    // Audio and video quality for online songs, here as well as in Settings > Streaming.
+    val qualityAction = if (vm.onlineName != null && song.volume == com.skarif.kairos.data.db.ONLINE_VOLUME) {
+        listOf(SheetAction("Quality", Ic.Wave, keepOpen = true) { quality = true })
+    } else emptyList()
     when {
         speed -> SpeedDialog(vm) { speed = false; onDismiss() }
+        quality -> StreamQualityDialog(vm) { quality = false; onDismiss() }
         info -> SongInfoDialog(vm, song) { info = false; onDismiss() }
         else -> SongActionsDialog(
             vm, song, onOpenAlbum, onOpenArtist = onOpenArtist,
             extra = listOf(
                 SheetAction("Start song radio", Ic.Radio) { vm.startRadio(song) },
+            ) + findVideo + qualityAction + listOf(
                 // These two swap this menu for their own dialog, so the sheet must not close itself.
                 SheetAction("Playback speed", Ic.Speed, keepOpen = true) { speed = true },
                 SheetAction("Sleep timer", Ic.Clock) { onSleep() },
@@ -125,6 +140,44 @@ fun SpeedDialog(vm: MainViewModel, onDismiss: () -> Unit) {
                     }
                 }
                 Text("Pitch changes with speed, like a record. 1× is normal.", style = T.small, color = c.muted)
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done", color = c.text) } },
+    )
+}
+
+/** Audio and video quality for online songs, without leaving the player. Same settings as Settings > Streaming. */
+@Composable
+fun StreamQualityDialog(vm: MainViewModel, onDismiss: () -> Unit) {
+    val c = P.colors
+    val s by vm.settings.collectAsStateWithLifecycle()
+    com.skarif.kairos.ui.components.KairosDialog(
+        onDismissRequest = onDismiss,
+        containerColor = c.sheet,
+        title = { Text("Quality", style = T.h2, color = c.text) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Audio", style = T.title, color = c.text)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    com.skarif.kairos.data.StreamQuality.entries.forEach { q ->
+                        Pill(q.label, { vm.updateSettings { it.copy(streamQuality = q) } }, selected = s.streamQuality == q, modifier = Modifier.weight(1f))
+                    }
+                }
+                Text("Video", style = T.title, color = c.text)
+                val vq = com.skarif.kairos.data.VideoQuality.entries
+                vq.chunked(3).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { q ->
+                            Pill(q.label, { vm.updateSettings { it.copy(videoQuality = q) } }, selected = s.videoQuality == q, modifier = Modifier.weight(1f))
+                        }
+                        // Keep the last row's pills the same width as the others.
+                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+                Text(
+                    "Applies from the next song or video. Data saver on mobile data still caps video at 360p. Higher video quality uses much more data.",
+                    style = T.small, color = c.muted,
+                )
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done", color = c.text) } },

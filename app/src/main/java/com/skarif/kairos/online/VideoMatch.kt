@@ -39,7 +39,7 @@ object VideoMatch {
      * Index of the best match in [candidates], or null when none is good enough (better no
      * video than the wrong one). [durationSec] of 0 means unknown.
      */
-    fun pick(title: String, artist: String, durationSec: Long, candidates: List<Candidate>): Int? {
+    fun pick(title: String, artist: String, durationSec: Long, candidates: List<Candidate>, relaxed: Boolean = false): Int? {
         val want = words(coreTitle(title)).filter { it.length > 1 }
         if (want.isEmpty()) return null
         val artistWords = words(artist).filter { it.length > 2 }
@@ -51,14 +51,18 @@ object VideoMatch {
             val hay = words(c.title + " " + c.uploader).toSet()
             // Every word of the song's title must show up (allow one miss in a long title).
             val hits = want.count { it in hay }
-            if (hits < want.size - if (want.size >= 3) 1 else 0) return@forEachIndexed
+            // [relaxed] (second pass, only when the strict one found nothing) allows a few more misses:
+            // a video titled "Song | Official Music Video" with a different spelling still counts.
+            val allowedMiss = if (relaxed) maxOf(1, want.size / 3) else if (want.size >= 3) 1 else 0
+            if (hits < want.size - allowedMiss || hits == 0) return@forEachIndexed
             // Not a cover, remix, live take... unless the song itself is one.
             if (OFF.any { mentions(t, it) && !mentions(songTitle, it) }) return@forEachIndexed
             var score = 3.0 * hits / want.size
             if (durationSec > 0 && c.durationSec > 0) {
                 val diff = kotlin.math.abs(c.durationSec - durationSec)
                 // A video has an intro or an outro now and then; a different song is far off.
-                if (diff > maxOf(45L, durationSec / 4)) return@forEachIndexed
+                val limit = if (relaxed) maxOf(75L, durationSec / 3) else maxOf(45L, durationSec / 4)
+                if (diff > limit) return@forEachIndexed
                 score -= diff / 45.0
             } else if (c.durationSec <= 0) {
                 score -= 1.5 // no duration: a stream or a premiere, usually not playable as a clip
@@ -71,6 +75,6 @@ object VideoMatch {
             if (c.views > 0) score += 0.3 * kotlin.math.log10(c.views.toDouble())
             if (score > bestScore) { bestScore = score; best = i }
         }
-        return if (best >= 0 && bestScore >= 2.0) best else null
+        return if (best >= 0 && bestScore >= (if (relaxed) 1.4 else 2.0)) best else null
     }
 }

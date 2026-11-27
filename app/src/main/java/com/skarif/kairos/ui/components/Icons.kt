@@ -72,6 +72,7 @@ object Ic {
     val Speed by lazy { stroke("speed", "M12 21a9 9 0 1 1 9-9M12 12l4-4") }
     val More by lazy { solid("more", "M5 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM19 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4z") }
     val AddQueue by lazy { stroke("addQueue", "M3 6h13M3 12h9M3 18h9M18 13v8M14 17h8") }
+    val Video by lazy { stroke("video", "M3 7h12v10H3zM15 11l6-3.5v9L15 13") }
     val FillFrame by lazy { stroke("fillFrame", "M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5") }
     val FitFrame by lazy { stroke("fitFrame", "M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5") }
     val PlaylistAdd by lazy { stroke("playlistAdd", "M3 6h12M3 12h12M3 18h7M17 14v7M13.5 17.5h7") }

@@ -232,6 +232,19 @@ class PlayerConnection(private val context: Context, private val appScope: Corou
         if (c.playbackState == Player.STATE_IDLE) c.prepare()
     }
 
+    /**
+     * Turns the picture off or on WITHOUT touching the stream: nothing is rebuffered and the sound
+     * does not skip, unlike [swapStream]. With the video track disabled nothing decodes it, and the
+     * player stops reading the picture-only stream. Used when the player is minimised or the app
+     * goes to the background.
+     */
+    fun setVideoRendering(on: Boolean) {
+        val c = controller ?: return
+        val params = c.trackSelectionParameters
+        if (params.disabledTrackTypes.contains(C.TRACK_TYPE_VIDEO) == !on) return
+        c.trackSelectionParameters = params.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, !on).build()
+    }
+
     /** Called when a song ends and the next one starts on its own (used by the sleep timer). */
     fun onAutoTransition(listener: () -> Unit) { transitionListeners += listener }
     fun removeAutoTransition(listener: () -> Unit) { transitionListeners -= listener }

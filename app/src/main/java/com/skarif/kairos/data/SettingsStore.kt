@@ -31,17 +31,24 @@ enum class OnlineLyricsType { SYNCED, PLAIN }
 enum class ReplayGainMode { OFF, TRACK, ALBUM }
 /** Streaming quality for the online source. [kbps] is what YouTube typically serves at that tier. */
 enum class StreamQuality(val label: String, val kbps: Int) { LOW("Data saver", 50), NORMAL("Normal", 128), HIGH("High", 160) }
+/** Picture quality of online videos. [AUTO] follows the stream quality / data saver (about 720p, the smallest on data saver). */
+enum class VideoQuality(val label: String, val maxHeight: Int) { AUTO("Auto", 0), P360("360p", 360), P480("480p", 480), P720("720p", 720), P1080("1080p", 1080) }
 /** What the online Download action should save when the user chooses to remember it. */
 enum class DownloadMode { AUDIO_ONLY, AUDIO_VIDEO, SAVE_TO_PHONE }
 enum class SongSort(val label: String) {
     TITLE("Title"), ARTIST("Artist"), ALBUM("Album"), DATE_ADDED("Date added"), LENGTH("Length"), MOST_PLAYED("Most played")
 }
 
+/** A little heavier veil than the old 0.5 so text stays easy to read over bright covers. */
+const val DEFAULT_BACKGROUND_GLOW = 0.38f
+
 data class Settings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val colorFromArt: Boolean = true,
     val fixedColor: Int = 0xFFBD3657.toInt(),
     val blurBackground: Boolean = true,
+    /** 0 = a heavy veil over the living background, 1 = almost none. [DEFAULT_BACKGROUND_GLOW] is the default look. */
+    val backgroundGlow: Float = DEFAULT_BACKGROUND_GLOW,
     val pureBlack: Boolean = false,
     val readEmbeddedLyrics: Boolean = true,
     val readLrcFiles: Boolean = true,
@@ -81,6 +88,12 @@ data class Settings(
     val ignoreArticles: Boolean = false,
     /** Online flavor only. */
     val streamQuality: StreamQuality = StreamQuality.HIGH,
+    /** Online flavor only: picture quality of videos. */
+    val videoQuality: VideoQuality = VideoQuality.AUTO,
+    /** Show the song's synced lyrics as subtitles over a playing video. */
+    val videoSubtitles: Boolean = true,
+    /** Show the current synced lyric line in the mini player, in place of the artist. */
+    val miniLyrics: Boolean = true,
     /** Online flavor only: use [StreamQuality.LOW] on metered (mobile) networks. */
     val dataSaverOnMobile: Boolean = true,
     /** Online flavor only: online search starts on Videos instead of Songs. */
@@ -105,6 +118,7 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
         val colorFromArt = booleanPreferencesKey("color_from_art")
         val fixedColor = intPreferencesKey("fixed_color")
         val blur = booleanPreferencesKey("blur")
+        val glow = androidx.datastore.preferences.core.floatPreferencesKey("bg_glow")
         val pureBlack = booleanPreferencesKey("pure_black")
         val embedded = booleanPreferencesKey("lyrics_embedded")
         val lrc = booleanPreferencesKey("lyrics_lrc")
@@ -132,6 +146,9 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
         val keepScreenOn = booleanPreferencesKey("keep_screen_on_lyrics")
         val ignoreArticles = booleanPreferencesKey("ignore_articles")
         val streamQuality = stringPreferencesKey("stream_quality")
+        val videoQuality = stringPreferencesKey("video_quality")
+        val videoSubtitles = booleanPreferencesKey("video_subtitles")
+        val miniLyrics = booleanPreferencesKey("mini_lyrics")
         val dataSaver = booleanPreferencesKey("data_saver_mobile")
         val videosFirst = booleanPreferencesKey("search_videos_first")
         val downloadToPhone = booleanPreferencesKey("download_to_phone")
@@ -158,6 +175,7 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
             colorFromArt = p[K.colorFromArt] ?: d.colorFromArt,
             fixedColor = p[K.fixedColor] ?: d.fixedColor,
             blurBackground = p[K.blur] ?: d.blurBackground,
+            backgroundGlow = (p[K.glow] ?: d.backgroundGlow).coerceIn(0f, 1f),
             pureBlack = p[K.pureBlack] ?: d.pureBlack,
             readEmbeddedLyrics = p[K.embedded] ?: d.readEmbeddedLyrics,
             readLrcFiles = p[K.lrc] ?: d.readLrcFiles,
@@ -185,6 +203,9 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
             keepScreenOnLyrics = p[K.keepScreenOn] ?: d.keepScreenOnLyrics,
             ignoreArticles = p[K.ignoreArticles] ?: d.ignoreArticles,
             streamQuality = enumOr(p[K.streamQuality], d.streamQuality),
+            videoQuality = enumOr(p[K.videoQuality], d.videoQuality),
+            videoSubtitles = p[K.videoSubtitles] ?: d.videoSubtitles,
+            miniLyrics = p[K.miniLyrics] ?: d.miniLyrics,
             dataSaverOnMobile = p[K.dataSaver] ?: d.dataSaverOnMobile,
             searchVideosFirst = p[K.videosFirst] ?: d.searchVideosFirst,
             downloadToPhone = p[K.downloadToPhone] ?: d.downloadToPhone,
@@ -199,6 +220,7 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
         p[K.colorFromArt] = s.colorFromArt
         p[K.fixedColor] = s.fixedColor
         p[K.blur] = s.blurBackground
+        p[K.glow] = s.backgroundGlow.coerceIn(0f, 1f)
         p[K.pureBlack] = s.pureBlack
         p[K.embedded] = s.readEmbeddedLyrics
         p[K.lrc] = s.readLrcFiles
@@ -226,6 +248,9 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
         p[K.keepScreenOn] = s.keepScreenOnLyrics
         p[K.ignoreArticles] = s.ignoreArticles
         p[K.streamQuality] = s.streamQuality.name
+        p[K.videoQuality] = s.videoQuality.name
+        p[K.videoSubtitles] = s.videoSubtitles
+        p[K.miniLyrics] = s.miniLyrics
         p[K.dataSaver] = s.dataSaverOnMobile
         p[K.videosFirst] = s.searchVideosFirst
         p[K.downloadMode] = s.downloadMode.name

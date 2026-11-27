@@ -1,6 +1,30 @@
 # Changelog
 
-## Unreleased
+## Online 0.9.2.2
+- Fix: lyrics subtitles over a video froze on one line; they now follow the song
+- Video: when no video is found for a song, "Pick a video" on the no-video dialog searches YouTube right in the player and remembers your choice for that song
+- Video: the soft blurred backdrop behind a fitted video now grabs its frames the supported way (the old way may have returned nothing); it is skipped in Fill mode, where it can't be seen
+- Smoother: the living background redraws about 30 times a second instead of at the screen's rate, its colour boost is computed once per song, and it is cached as one picture, to cut GPU work while lists and the player page scroll
+- Smoother: the living background holds still while you scroll, and carries on a moment after you stop
+
+## Online 0.9.2.1
+- Fix: the fit/fill and lyrics-subtitle buttons on a video did nothing when tapped (the cover's swipe layer sat on top of them); they work now, and subtitles no longer slide under the download and heart buttons
+- Video: when no video is found for a song, a "Find video" chip on the player offers to search again or search by hand
+- Player menu (the three dots): a Quality entry for audio and video quality, same settings as Settings > Streaming
+- Fix: Backup and restore left out online songs' details, so on a new phone or after reinstalling their favourites, playlists and history did not come back; they do now. Backups also keep the background glow, video quality, subtitles and mini-player lyrics settings
+- Look: a slightly heavier default veil over the background (your own Background glow setting is unchanged), and soft colour glows from the cover drift behind the player
+- Video: more songs find their video (a looser second search pass; covers, live takes and remixes are still ignored). Video has a dot on the switch when one is ready, and "Find music video" is in the player and mini-player menus
+- Video: your Song / Video choice is kept when you leave the app and come back, and a video that fails gets one quiet retry with a fresh address before falling back to the song's sound
+- Video: minimising the player or leaving the app no longer swaps the video back to the song's sound after a few seconds (that paused and rebuffered the song); the picture just stops drawing and comes back when you return
+- Video: "Retry video search" on the no-video dialog searches again (a "no video" answer was remembered for a day), and Retry after a network error now really retries
+- Settings > Background glow: a slider for how much of the cover's colour shows through the background
+- Video quality: Auto, 360p, 480p, 720p or 1080p in Settings > Streaming (Auto keeps the old behaviour; data saver on mobile data still caps at 360p). Downloaded videos are unaffected
+- Lyrics as subtitles over videos with synced lyrics, with an on/off button on the video and in Settings
+- Mini player: the current synced lyric line replaces the artist name while the song plays (can be turned off in Settings)
+- Mini player: a heart button for favourites, and a taller player (76 dp) with a bigger cover (60 dp)
+- Look: a thinner veil over the living background so the cover's colour blooms through (edges stay darker for readability)
+
+## Online 0.9.2.0
 - Video: a Song | Video switch at the top of the player for online songs, like YouTube Music. Video fits the cover whole (double-tap to fill it); it starts at the same second and goes back to the song's sound when you close the player, leave the app or swap song
 - Fix: a stream address that stopped working (the phone changed from Wi-Fi to mobile data, say) made the song skip; it now gets one retry with a fresh address first
 - Fix: swapping a song's stream no longer counts as a second play in Stats

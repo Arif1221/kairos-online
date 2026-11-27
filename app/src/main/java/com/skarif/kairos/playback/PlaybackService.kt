@@ -75,6 +75,7 @@ class PlaybackService : MediaSessionService() {
             // Online flavor: a data source that also understands streamed songs' Uris.
             .apply {
                 com.skarif.kairos.online.Flavor.online?.let { online ->
+                    online.setVideoQualityProvider { container.settings.settings.value.videoQuality }
                     val data = online.dataSourceFactory(this@PlaybackService, ::streamQuality)
                     val default = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(data)
                     // Video mode: the picture-only stream merged with the song's own audio.

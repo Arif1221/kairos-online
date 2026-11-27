@@ -552,7 +552,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun backupTo(uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
-                val json = backup.export(allSongs.value)
+                val json = backup.export(ct.db.songs().observeAll().first())
                 getApplication<Application>().contentResolver.openOutputStream(uri, "wt")!!.use { it.write(json.toByteArray()) }
                 getApplication<Application>().getSharedPreferences("backup", android.content.Context.MODE_PRIVATE)
                     .edit().putLong("last_backup_at", System.currentTimeMillis()).apply()
@@ -564,7 +564,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 val json = getApplication<Application>().contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
-                backup.restore(json, allSongs.value)
+                backup.restore(json, ct.db.songs().observeAll().first())
             }.onSuccess { r ->
                 toast(
                     "Restored ${r.favourites} favourites, ${r.playlists} playlists, ${r.plays} plays" +
@@ -791,8 +791,36 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val playerOpen = MutableStateFlow(false)
     private val videoRetryTick = MutableStateFlow(0)
     private var minimizeVideoGraceJob: kotlinx.coroutines.Job? = null
+    /** The song whose video already got its one automatic retry after an error. */
+    private var videoRetriedFor: Long? = null
 
-    fun retryVideoCheck() { videoRetryTick.value++ }
+    /** Search again for [song]'s video, also when an earlier search found nothing (that answer is cached for a day). */
+    fun retryVideoCheck(song: SongEntity? = null) {
+        if (song != null) Flavor.online?.forgetVideoMatch(song)
+        videoRetryTick.value++
+    }
+
+    /** Videos that came up when searching for [song], for picking one by hand. Throws on network errors. */
+    suspend fun videoChoices(song: SongEntity): List<SongEntity> {
+        val online = Flavor.online ?: return emptyList()
+        val query = "${song.title} ${song.artist.split(',', '&').first().trim()}".trim()
+        return online.search(query, com.skarif.kairos.online.OnlineKind.VIDEOS).items
+            .filterIsInstance<com.skarif.kairos.online.OnlineItem.Track>()
+            .map { it.song }
+    }
+
+    /** The listener picked [videoId] as [song]'s video: remember it, look again, and switch to Video once it is ready. */
+    fun chooseVideo(song: SongEntity, videoId: String) {
+        val online = Flavor.online ?: return
+        online.chooseVideo(song, videoId)
+        retryVideoCheck()
+        viewModelScope.launch {
+            val ready = withTimeoutOrNull(8_000) {
+                videoState.first { it is VideoState.Available && it.songId == song.id }
+            }
+            if (ready != null) setVideo(true)
+        }
+    }
 
     val videoSize = ct.player.videoSize
     val videoFirstFrame = ct.player.firstFrame
@@ -802,9 +830,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         currentSong.distinctUntilChangedBy { it?.id },
         combine(playerOpen, videoPreferred) { open, pref -> open || pref }.distinctUntilChanged(),
         videoRetryTick,
-    ) { s, active, _ -> s to active }
+    ) { s, active, tick -> Triple(s, active, tick) }
         .distinctUntilChanged()
-        .flatMapLatest { (s, open) ->
+        .flatMapLatest { (s, open, _) ->
             val online = Flavor.online
             if (s == null || online == null || !s.isOnline || !open) flowOf<VideoState>(VideoState.None)
             else flow<VideoState> {
@@ -829,26 +857,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         videoWanted.value = on
     }
 
-    /** Drop both the active video request and its preference (e.g. app sent to background). */
-    fun dropVideo() {
+    /**
+     * App sent to the background: stop the picture (no data, no decoding) but keep the listener's
+     * Song/Video choice, so coming back resumes the same mode instead of silently reverting to audio.
+     */
+    fun pauseVideoForBackground() {
         minimizeVideoGraceJob?.cancel()
-        videoPreferred.value = false
-        videoWanted.value = false
+        // No stream swap: the sound keeps playing without a hiccup, only the picture is switched off.
+        ct.player.setVideoRendering(false)
+    }
+
+    /** App back in front with the full player open: restore the Song/Video choice. */
+    fun resumeVideoIfPreferred() {
+        if (playerOpen.value) ct.player.setVideoRendering(true)
+        if (playerOpen.value && videoPreferred.value) videoWanted.value = true
     }
 
     fun setPlayerOpen(open: Boolean) {
         playerOpen.value = open
+        minimizeVideoGraceJob?.cancel()
         if (open) {
-            minimizeVideoGraceJob?.cancel()
+            ct.player.setVideoRendering(true)
             videoWanted.value = videoPreferred.value
         } else if (videoWanted.value) {
-            // Brief grace period while minimizing so browsing tabs and reopening the player
-            // does not pause and re-buffer audio by swapping streams immediately.
-            minimizeVideoGraceJob?.cancel()
-            minimizeVideoGraceJob = viewModelScope.launch {
-                kotlinx.coroutines.delay(15_000)
-                if (!playerOpen.value) videoWanted.value = false
-            }
+            // Minimised: keep the stream (swapping back to audio would pause and rebuffer the song),
+            // just stop drawing and decoding the picture. Reopening the player brings it back at once.
+            ct.player.setVideoRendering(false)
         }
     }
 
@@ -860,14 +894,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // the next track with a valid match can automatically return to video.
         viewModelScope.launch {
             now.map { it.songId }.filterNotNull().distinctUntilChanged().collect {
-                videoWanted.value = (playerOpen.value || videoWanted.value) && videoPreferred.value
+                videoRetriedFor = null
+                // Only with the player open: a new song while minimised starts as plain sound (no
+                // picture to prepare); the Video choice comes back when the player is opened.
+                if (playerOpen.value) ct.player.setVideoRendering(true)
+                videoWanted.value = playerOpen.value && videoPreferred.value
             }
         }
         ct.player.onVideoError = { why ->
-            if (videoWanted.value) notify("Couldn't play video ($why) — playing audio", isError = true)
-            // Keep the preference, but stop retrying this track in a tight loop. The next track
-            // change re-arms videoWanted and can resume video if that track has a valid match.
-            videoWanted.value = false
+            val ready = videoState.value as? VideoState.Available
+            val sid = now.value.songId
+            val online = Flavor.online
+            if (videoWanted.value && ready != null && online != null && sid != null && videoRetriedFor != sid) {
+                // One quiet retry with a fresh stream address (the address may simply have expired,
+                // or the network switched), going back to the song's sound in between.
+                videoRetriedFor = sid
+                online.forgetStream(online.videoUri(ready.videoId))
+                videoWanted.value = false
+                viewModelScope.launch {
+                    kotlinx.coroutines.delay(400)
+                    if (playerOpen.value && videoPreferred.value && now.value.songId == sid) videoWanted.value = true
+                }
+            } else {
+                if (videoWanted.value) notify("Couldn't play video ($why) — playing audio", isError = true)
+                // Keep the preference, but stop retrying this track in a tight loop. The next track
+                // change re-arms videoWanted and can resume video if that track has a valid match.
+                videoWanted.value = false
+            }
         }
         ct.player.onPlaybackError = { title, why, skipped ->
             val prefix = if (!title.isNullOrBlank()) "Couldn't play \"$title\"" else "Couldn't play song"

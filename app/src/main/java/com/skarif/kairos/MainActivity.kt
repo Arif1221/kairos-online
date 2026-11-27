@@ -89,6 +89,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import com.skarif.kairos.ui.motion.Motion
@@ -267,7 +268,7 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
         var collectionMenu by remember { mutableStateOf<String?>(null) }
         val backArt by vm.artwork.collectAsStateWithLifecycle()
         val backPlaying by vm.isPlaying.collectAsStateWithLifecycle()
-        val backdrop = com.skarif.kairos.ui.components.rememberBackdrop(backArt, settings.blurBackground, backPlaying)
+        val backdrop = com.skarif.kairos.ui.components.rememberBackdrop(backArt, settings.blurBackground, backPlaying, settings.backgroundGlow)
         val onlineNav = remember(nav) {
                 com.skarif.kairos.ui.screens.OnlineNav(
                     search = { q, kind ->
@@ -283,15 +284,16 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
             }
         CompositionLocalProvider(
             LocalPlayer provides player, com.skarif.kairos.ui.components.LocalBackdrop provides backdrop,
-            // Mini player: 12 dp above the nav bar, 64 dp tall, plus a little air above it.
-            com.skarif.kairos.ui.screens.LocalBottomClearance provides (if (song != null) 96.dp else 0.dp),
+            // Mini player: 12 dp above the nav bar, 76 dp tall, plus a little air above it.
+            com.skarif.kairos.ui.screens.LocalBottomClearance provides (if (song != null) 108.dp else 0.dp),
             // One long-press menu for every album, artist, genre, playlist and mix tile.
             com.skarif.kairos.ui.screens.LocalCollectionMenu provides { k -> collectionMenu = k },
             com.skarif.kairos.ui.screens.LocalOnlineNav provides onlineNav,
             androidx.compose.foundation.LocalOverscrollFactory provides com.skarif.kairos.ui.motion.IosOverscrollFactory,
         ) {
         // Black behind everything: what shows around the app when it sinks back behind the player.
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
+        // nestedScroll(scrollWatch): the living background pauses while any list scrolls.
+        Box(Modifier.fillMaxSize().background(Color.Black).nestedScroll(backdrop.scrollWatch)) {
             NavHost(
                 nav, startDestination = start,
                 // iOS sheet depth: as the player (or a sheet) comes up, the app behind sinks back,
@@ -405,7 +407,7 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                     Modifier.fillMaxSize().drawBehind {
                         val p = player.progress.value.coerceIn(0f, 1f)
                         if (p >= 1f) return@drawBehind
-                        val top = size.height - miniBottom - 64.dp.toPx() - 48.dp.toPx()
+                        val top = size.height - miniBottom - 76.dp.toPx() - 48.dp.toPx()
                         drawRect(
                             androidx.compose.ui.graphics.Brush.verticalGradient(
                                 0f to bg.copy(alpha = 0f), 0.35f to bg.copy(alpha = 0.8f), 1f to bg.copy(alpha = 0.95f),
@@ -477,7 +479,7 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
             com.skarif.kairos.ui.screens.NoticeBar(
                 vm,
                 Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
-                    .padding(bottom = when { playerUp -> 24.dp; song != null && route in TABS -> 170.dp; song != null -> 96.dp; route in TABS -> 96.dp; else -> 24.dp }),
+                    .padding(bottom = when { playerUp -> 24.dp; song != null && route in TABS -> 182.dp; song != null -> 108.dp; route in TABS -> 96.dp; else -> 24.dp }),
             )
 
             AnimatedVisibility(menuOpen, enter = fadeIn(Motion.fadeIn()) + slideInHorizontally(Motion.spatial()) { -it / 3 }, exit = fadeOut(Motion.fadeOut()) + slideOutHorizontally(Motion.spatial()) { -it / 3 }) {

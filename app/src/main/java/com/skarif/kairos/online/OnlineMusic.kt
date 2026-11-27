@@ -106,6 +106,15 @@ interface OnlineMusic {
      */
     suspend fun videoFor(song: SongEntity): String?
 
+    /** Where the player reads the picture quality setting from (set once by the playback service). */
+    fun setVideoQualityProvider(provider: () -> com.skarif.kairos.data.VideoQuality)
+
+    /** Forgets a remembered "no video found" for [song] so the next [videoFor] searches again. */
+    fun forgetVideoMatch(song: SongEntity)
+
+    /** Remembers [videoId] as the video of [song], picked by hand when the automatic match found nothing (or the wrong one). */
+    fun chooseVideo(song: SongEntity, videoId: String) {}
+
     /** Like [mediaUri], but the player gets the picture too. Streams the video's own sound. */
     fun videoUri(videoId: String): Uri
 

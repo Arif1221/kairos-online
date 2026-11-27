@@ -18,6 +18,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import com.skarif.kairos.data.StreamQuality
+import com.skarif.kairos.data.VideoQuality
 import com.skarif.kairos.playback.VIDEO_SCHEME
 import com.skarif.kairos.data.db.ONLINE_VOLUME
 import com.skarif.kairos.data.db.SongEntity
@@ -208,6 +209,7 @@ internal object YouTubeMusic : OnlineMusic {
         }
         @Synchronized fun get(k: String): V? = map[k]?.takeIf { System.currentTimeMillis() - it.first < ttlMs }?.second
         @Synchronized fun put(k: String, v: V) { map[k] = System.currentTimeMillis() to v }
+        @Synchronized fun remove(k: String) { map.remove(k) }
     }
     private val searches = Lru<OnlinePage>(40, 10 * 60_000L)
     private val collections = Lru<OnlineCollection>(30, 30 * 60_000L)
@@ -443,7 +445,16 @@ internal object YouTubeMusic : OnlineMusic {
 
     override fun audioUri(videoId: String): Uri = Uri.parse("$SCHEME:$videoId")
 
-    private fun videoCacheKey(videoId: String, quality: StreamQuality) = "yt-video:$videoId:$quality"
+    @Volatile private var videoTier: () -> VideoQuality = { VideoQuality.AUTO }
+    override fun setVideoQualityProvider(provider: () -> VideoQuality) { videoTier = provider }
+
+    /**
+     * An explicit picture quality gets its own cache entries (a different file behind the same key
+     * would play as garbage). AUTO keeps the original key, and downloads always use it, so videos
+     * saved earlier stay playable whatever the picture setting is now.
+     */
+    private fun videoCacheKey(videoId: String, quality: StreamQuality, tier: VideoQuality = videoTier()) =
+        "yt-video:$videoId:$quality" + if (tier == VideoQuality.AUTO) "" else ":${tier.name}"
 
     /** Resolve the current video and cache only its opening range; playback continues on audio meanwhile. */
     override suspend fun prefetchVideo(context: Context, song: SongEntity, quality: StreamQuality): Unit = withContext(Dispatchers.IO) {
@@ -540,10 +551,10 @@ internal object YouTubeMusic : OnlineMusic {
             .createDataSource()
     }
 
-    private fun videoDataSourceFactory(context: Context, videoId: String, quality: StreamQuality): CacheDataSource.Factory {
-        val key = videoCacheKey(videoId, quality)
+    private fun videoDataSourceFactory(context: Context, videoId: String, quality: StreamQuality, tier: VideoQuality = videoTier()): CacheDataSource.Factory {
+        val key = videoCacheKey(videoId, quality, tier)
         val upstream = ResolvingDataSource.Factory(http) { spec ->
-            spec.withUri(Uri.parse(videoStreamUrl(videoId, quality)))
+            spec.withUri(Uri.parse(videoStreamUrl(videoId, quality, tier)))
         }
         return CacheDataSource.Factory()
             .setCache(StreamCache.videos(context))
@@ -576,7 +587,7 @@ internal object YouTubeMusic : OnlineMusic {
                 .setUpstreamDataSourceFactory(streamed)
                 .setCacheKeyFactory { spec ->
                     val id = spec.uri.schemeSpecificPart
-                    videoCacheKey(id, qualityFor(app, id, quality))
+                    videoCacheKey(id, qualityFor(app, id, quality), VideoQuality.AUTO) // downloads keep the original key
                 }
                 .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
                 .createDataSource()
@@ -587,6 +598,16 @@ internal object YouTubeMusic : OnlineMusic {
         streamUrls.keys.removeIf { it.startsWith("$id|") }
         videoUrls.keys.removeIf { it.startsWith("$id|") }
         extracted.remove(id)
+    }
+
+    override fun forgetVideoMatch(song: SongEntity) {
+        videos.remove(song.fileName)
+        appContext?.getSharedPreferences("video_matches", Context.MODE_PRIVATE)?.edit()?.remove(song.fileName)?.apply()
+    }
+
+    override fun chooseVideo(song: SongEntity, videoId: String) {
+        videos.put(song.fileName, videoId)
+        appContext?.getSharedPreferences("video_matches", Context.MODE_PRIVATE)?.edit()?.putString(song.fileName, videoId)?.apply()
     }
 
     override suspend fun videoFor(song: SongEntity): String? = withContext(Dispatchers.IO) {
@@ -628,10 +649,11 @@ internal object YouTubeMusic : OnlineMusic {
         if (hits.isEmpty() && (music.isFailure || plain.isFailure)) {
             throw music.exceptionOrNull() ?: plain.exceptionOrNull()!!
         }
-        val best = VideoMatch.pick(
-            song.title, song.artist, song.durationMs / 1000,
-            hits.map { VideoMatch.Candidate(it.name, it.uploaderName.orEmpty(), it.duration, it.viewCount) },
-        )
+        val candidates = hits.map { VideoMatch.Candidate(it.name, it.uploaderName.orEmpty(), it.duration, it.viewCount) }
+        // Strict first; if nothing passes, a looser second pass (covers, live takes and remixes are still
+        // rejected) so fewer songs end up with a greyed-out Video button.
+        val best = VideoMatch.pick(song.title, song.artist, song.durationMs / 1000, candidates)
+            ?: VideoMatch.pick(song.title, song.artist, song.durationMs / 1000, candidates, relaxed = true)
         // If the successful search produced no acceptable match but the other search failed,
         // the result is inconclusive rather than a confirmed no-video result.
         if (best == null && (music.isFailure || plain.isFailure)) {
@@ -679,7 +701,7 @@ internal object YouTubeMusic : OnlineMusic {
         val result = HashSet<String>()
         for ((songId, value) in mapping) {
             val videoId = value as? String ?: continue
-            if (StreamQuality.values().any { q -> StreamCache.isComplete(saved, videoCacheKey(videoId, q)) }) result += songId
+            if (StreamQuality.values().any { q -> StreamCache.isComplete(saved, videoCacheKey(videoId, q, VideoQuality.AUTO)) }) result += songId
         }
         return result
     }
@@ -693,10 +715,10 @@ internal object YouTubeMusic : OnlineMusic {
         val matchedVideoId = matches.getString(videoId, null)
         StreamQuality.values().forEach { q ->
             saved.removeResource(cacheKey(videoId, q))
-            videoSaved.removeResource(videoCacheKey(videoId, q))
+            videoSaved.removeResource(videoCacheKey(videoId, q, VideoQuality.AUTO))
             if (matchedVideoId != null) {
                 saved.removeResource(cacheKey(matchedVideoId, q))
-                videoSaved.removeResource(videoCacheKey(matchedVideoId, q))
+                videoSaved.removeResource(videoCacheKey(matchedVideoId, q, VideoQuality.AUTO))
             }
         }
         matches.edit().remove(videoId).apply()
@@ -706,7 +728,7 @@ internal object YouTubeMusic : OnlineMusic {
         val matches = context.getSharedPreferences("video_download_matches", Context.MODE_PRIVATE)
         val matchedVideoId = matches.getString(songId, null) ?: return
         StreamCache.videoDownloads(context).let { saved ->
-            StreamQuality.values().forEach { saved.removeResource(videoCacheKey(matchedVideoId, it)) }
+            StreamQuality.values().forEach { saved.removeResource(videoCacheKey(matchedVideoId, it, VideoQuality.AUTO)) }
         }
         if (matchedVideoId != songId) StreamCache.downloads(context).let { saved ->
             StreamQuality.values().forEach { saved.removeResource(cacheKey(matchedVideoId, it)) }
@@ -766,11 +788,11 @@ internal object YouTubeMusic : OnlineMusic {
         val videoId = videoFor(song) ?: throw IOException("No matching video for ${song.title}")
         app.getSharedPreferences("video_download_matches", Context.MODE_PRIVATE).edit().putString(song.fileName, videoId).apply()
         val q = qualityFor(app, videoId) { quality }
-        val videoKey = videoCacheKey(videoId, q)
+        val videoKey = videoCacheKey(videoId, q, VideoQuality.AUTO)
         val videoSpec = DataSpec.Builder().setUri(videoUri(videoId)).setKey(videoKey).build()
         val videoSource = CacheDataSource.Factory()
             .setCache(StreamCache.videoDownloads(app))
-            .setUpstreamDataSourceFactory(videoDataSourceFactory(app, videoId, q))
+            .setUpstreamDataSourceFactory(videoDataSourceFactory(app, videoId, q, VideoQuality.AUTO))
             .setCacheKeyFactory { videoKey }
             .createDataSource()
         val videoWriter = CacheWriter(videoSource, videoSpec, null) { length, done, _ ->
@@ -876,8 +898,8 @@ internal object YouTubeMusic : OnlineMusic {
      * file, so video mode plays this merged with the song's own audio (see PlaybackService).
      * Data saver takes the smallest. Called on the player's loading thread, so blocking is fine.
      */
-    private fun videoStreamUrl(videoId: String, quality: StreamQuality): String {
-        val key = "$videoId|$quality"
+    private fun videoStreamUrl(videoId: String, quality: StreamQuality, tier: VideoQuality = videoTier()): String {
+        val key = "$videoId|$quality|${tier.name}"
         videoUrls[key]?.let { if (System.currentTimeMillis() - it.at < URL_TTL_MS) return it.url }
         try {
             init
@@ -890,9 +912,15 @@ internal object YouTubeMusic : OnlineMusic {
             // MP4 (H.264) plays on every phone's hardware decoder; WebM only when it's all there is.
             val usable = all.filter { it.format == org.schabi.newpipe.extractor.MediaFormat.MPEG_4 }.ifEmpty { all }
                 .sortedBy(::height)
-            val pick = when (quality) {
-                StreamQuality.LOW -> usable.first()
-                else -> usable.lastOrNull { height(it) <= 720 } ?: usable.first()
+            val pick = if (tier == VideoQuality.AUTO) {
+                when (quality) {
+                    StreamQuality.LOW -> usable.first()
+                    else -> usable.lastOrNull { height(it) <= 720 } ?: usable.first()
+                }
+            } else {
+                // The listener's choice; the mobile-data saver still caps it at 360p.
+                val cap = if (quality == StreamQuality.LOW) minOf(tier.maxHeight, 360) else tier.maxHeight
+                usable.lastOrNull { height(it) <= cap } ?: usable.first()
             }
             return pick.content.also { putResolved(videoUrls, key, it) }
         } catch (e: Exception) {

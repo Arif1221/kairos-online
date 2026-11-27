@@ -132,6 +132,23 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onFolders: () -> Unit,
                     }
                 }
                 ToggleRow("Blurred album background", s.blurBackground, { v -> vm.updateSettings { it.copy(blurBackground = v) } })
+                if (s.blurBackground) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("Background glow", style = T.title, color = c.text)
+                        Text("${(s.backgroundGlow * 100).toInt()}%", style = T.num, color = c.accent)
+                    }
+                    androidx.compose.material3.Slider(
+                        value = s.backgroundGlow,
+                        onValueChange = { v -> vm.updateSettings { it.copy(backgroundGlow = v) } },
+                        valueRange = 0f..1f,
+                        colors = androidx.compose.material3.SliderDefaults.colors(
+                            thumbColor = c.accent,
+                            activeTrackColor = c.accent,
+                            inactiveTrackColor = c.muted.copy(alpha = 0.25f),
+                        ),
+                    )
+                    Text("More glow lets the cover's colour show through; less keeps text on a darker, calmer background.", style = T.small, color = c.muted)
+                }
                 ToggleRow("Pure black in dark mode", s.pureBlack, { v -> vm.updateSettings { it.copy(pureBlack = v) } }, "Saves battery on AMOLED screens")
             }
 
@@ -385,7 +402,7 @@ private fun StreamingCard(vm: MainViewModel, source: String) {
     LaunchedEffect(Unit) { vm.onlineUi.refreshCacheSize() }
     Card(Modifier) {
         Text("Streaming", style = T.h2, color = c.text)
-        Text("$source songs and videos play as audio only.", style = T.small, color = c.muted)
+        Text("$source songs play as audio; videos are shown on the player's Video switch.", style = T.small, color = c.muted)
         Segmented(com.skarif.kairos.data.StreamQuality.entries.map { it.label }, s.streamQuality.ordinal, { i ->
             vm.updateSettings { it.copy(streamQuality = com.skarif.kairos.data.StreamQuality.entries[i]) }
         })
@@ -393,6 +410,17 @@ private fun StreamingCard(vm: MainViewModel, source: String) {
             "About ${s.streamQuality.kbps} kbps, roughly ${"%.1f".format(s.streamQuality.kbps * 60 / 8 / 1000.0)} MB a minute. Applies from the next song.",
             style = T.small, color = c.muted,
         )
+        Text("Video quality", style = T.title, color = c.text)
+        Segmented(com.skarif.kairos.data.VideoQuality.entries.map { it.label }, s.videoQuality.ordinal, { i ->
+            vm.updateSettings { it.copy(videoQuality = com.skarif.kairos.data.VideoQuality.entries[i]) }
+        })
+        Text(
+            if (s.videoQuality == com.skarif.kairos.data.VideoQuality.AUTO) "Auto: about 720p, the smallest picture on data saver. Applies from the next video."
+            else "Up to ${s.videoQuality.label} when the video has it; data saver on mobile data still caps at 360p. Higher means much more data. Applies from the next video.",
+            style = T.small, color = c.muted,
+        )
+        ToggleRow("Lyrics as subtitles on videos", s.videoSubtitles, { v -> vm.updateSettings { it.copy(videoSubtitles = v) } }, "Synced lyrics, when the song has them")
+        ToggleRow("Lyrics in the mini player", s.miniLyrics, { v -> vm.updateSettings { it.copy(miniLyrics = v) } }, "The current line replaces the artist name")
         ToggleRow(
             "Data saver on mobile data", s.dataSaverOnMobile, { v -> vm.updateSettings { it.copy(dataSaverOnMobile = v) } },
             "Uses ${com.skarif.kairos.data.StreamQuality.LOW.label} quality when you're not on Wi-Fi",

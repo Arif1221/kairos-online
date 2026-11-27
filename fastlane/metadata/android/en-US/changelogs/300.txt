@@ -1,0 +1,2 @@
+• Video: a Song | Video switch in the player for online songs
+• Fixes: stream retry on a dead address, double play count, lookups that never stopped

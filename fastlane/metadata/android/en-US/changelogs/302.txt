@@ -1,0 +1,4 @@
+• Fix: lyrics subtitles over videos no longer freeze
+• "Pick a video" when no video is found for a song
+• Fix: blurred backdrop behind fitted videos now shows
+• Smoother living background and scrolling

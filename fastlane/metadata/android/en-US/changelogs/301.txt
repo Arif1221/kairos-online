@@ -1,0 +1,6 @@
+• Video: more songs find their video, your Song / Video choice is remembered, quality 360p to 1080p
+• Lyrics as subtitles over videos and in the mini player
+• Fix: fit/fill and subtitle buttons on videos now respond
+• "Find video" chip and a Quality entry in the player menu
+• Fix: backup restores online songs, favourites and playlists
+• Heavier default veil, soft colour glows

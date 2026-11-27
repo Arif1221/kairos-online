@@ -116,6 +116,8 @@ fun NowPlayingPane(
     val videoState by vm.videoState.collectAsStateWithLifecycle()
     val wantsVideo by vm.wantsVideo.collectAsStateWithLifecycle()
     val wantsVideoNow = rememberUpdatedState(wantsVideo)
+    val lyricsState by vm.lyrics.collectAsStateWithLifecycle()
+    val hasSyncedLyrics = (lyricsState as? com.skarif.kairos.ui.LyricsState.Ready)?.lyrics?.let { it.synced && !it.isEmpty() } == true
     val s = song ?: return
     val showToggle = vm.onlineName != null && s.volume == com.skarif.kairos.data.db.ONLINE_VOLUME
     // Must match the cover rectangle in PlayerSheet.
@@ -130,6 +132,8 @@ fun NowPlayingPane(
     var menu by remember { androidx.compose.runtime.mutableStateOf(false) }
     var speedDialog by remember { androidx.compose.runtime.mutableStateOf(false) }
     var videoHelp by remember { androidx.compose.runtime.mutableStateOf<VideoState?>(null) }
+    var videoPicker by remember { androidx.compose.runtime.mutableStateOf(false) }
+    if (videoPicker) VideoPickerDialog(vm, s) { videoPicker = false }
     val onlineNav = LocalOnlineNav.current
     if (menu) PlayerMenu(vm, s, onAlbum, { a -> onOpenCollection("artist:$a") }, onSleep, onEqualizer) { menu = false }
     if (speedDialog) SpeedDialog(vm) { speedDialog = false }
@@ -148,38 +152,31 @@ fun NowPlayingPane(
             text = {
                 Text(
                     if (err != null) {
-                        "${err.reason ?: "Kairos couldn't check YouTube for a video right now."} You can retry, or search directly in Search → Online → Video."
+                        "${err.reason ?: "Kairos couldn't check YouTube for a video right now."} You can retry, or pick a video yourself."
                     } else {
-                        "No music video matched \"${s.title}\" automatically.\n\nTo play it as a video, search for the song in Search → Online → Video."
+                        "No music video matched \"${s.title}\" automatically.\n\nPick one yourself from the search results, and Kairos will remember it for this song."
                     },
                     color = c.muted,
                     style = T.body,
                 )
             },
+            // Pick a video: search right here and choose one, instead of leaving the player.
             confirmButton = {
-                if (isError) {
-                    androidx.compose.material3.TextButton({
-                        videoHelp = null
-                        vm.retryVideoCheck()
-                    }) { Text("Retry", color = c.accent) }
-                } else {
-                    androidx.compose.material3.TextButton({
-                        videoHelp = null
-                        ctrl.collapse()
-                        onlineNav.search("${s.title} ${s.artist}".trim(), com.skarif.kairos.online.OnlineKind.VIDEOS)
-                    }) { Text("Search in Video", color = c.accent) }
-                }
+                androidx.compose.material3.TextButton({
+                    videoHelp = null
+                    videoPicker = true
+                }) { Text("Pick a video", color = c.accent) }
             },
             dismissButton = {
-                if (isError) {
-                    androidx.compose.material3.TextButton({
-                        videoHelp = null
-                        ctrl.collapse()
-                        onlineNav.search("${s.title} ${s.artist}".trim(), com.skarif.kairos.online.OnlineKind.VIDEOS)
-                    }) { Text("Search in Video", color = c.muted) }
-                } else {
-                    androidx.compose.material3.TextButton({ videoHelp = null }) { Text("Keep audio", color = c.muted) }
-                }
+                androidx.compose.material3.TextButton({
+                    videoHelp = null
+                    vm.retryVideoCheck(s)
+                }) { Text("Retry", color = c.muted) }
+                androidx.compose.material3.TextButton({
+                    videoHelp = null
+                    ctrl.collapse()
+                    onlineNav.search("${s.title} ${s.artist}".trim(), com.skarif.kairos.online.OnlineKind.VIDEOS)
+                }) { Text("Search tab", color = c.muted) }
             },
         )
     }
@@ -314,6 +311,31 @@ fun NowPlayingPane(
                     CircleButton(Ic.Lyrics, "Lyrics", onLyrics, container = Color(0x59000000), content = Color.White)
                     CircleButton(Ic.Menu, "More options", { menu = true }, container = Color(0x59000000), content = Color.White)
                 }
+                // Video controls. They are drawn here, after the gesture layer, so they get the touches;
+                // the video itself is drawn by the player layer underneath this page.
+                if (wantsVideo) Column(
+                    Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (hasSyncedLyrics) CircleButton(
+                        icon = Ic.Lyrics,
+                        contentDescription = if (settings.videoSubtitles) "Hide lyrics subtitles" else "Show lyrics as subtitles",
+                        onClick = { vm.updateSettings { it.copy(videoSubtitles = !it.videoSubtitles) } },
+                        size = 40.dp,
+                        container = if (settings.videoSubtitles) Color(0xB3FFFFFF) else Color(0x80000000),
+                        content = if (settings.videoSubtitles) Color.Black else Color.White,
+                        iconSize = 19.dp,
+                    )
+                    CircleButton(
+                        icon = if (ctrl.videoFill) Ic.FillFrame else Ic.FitFrame,
+                        contentDescription = if (ctrl.videoFill) "Video fills cover; switch to fit" else "Video fits cover; switch to fill",
+                        onClick = { ctrl.videoFill = !ctrl.videoFill },
+                        size = 40.dp,
+                        container = Color(0x80000000),
+                        content = Color.White,
+                        iconSize = 19.dp,
+                    )
+                }
                 if (!wantsVideo) Column(
                     Modifier.align(Alignment.BottomStart).padding(start = 22.dp, bottom = 34.dp, end = 110.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -384,6 +406,10 @@ fun NowPlayingPane(
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val sourceKind = if (s.volume == com.skarif.kairos.data.db.ONLINE_VOLUME) "Online" else "Offline"
                     val mediaKind = if (now.videoActive) "Video" else "Audio"
+                    // No video was found for this online song: say so here and offer to look again or search by hand.
+                    if (showToggle && (videoState is VideoState.Unavailable || videoState is VideoState.Error)) {
+                        InfoChip(Ic.Video, "Find video") { videoHelp = videoState }
+                    }
                     InfoChip(Ic.Wave, "$mediaKind · $sourceKind")
                     InfoChip(Ic.Wave, now.output?.let { "${s.formatLabel()} $it" } ?: s.formatLabel())
                     InfoChip(Ic.Clock, formatTime(s.durationMs))
@@ -530,6 +556,7 @@ private fun ModeToggle(state: VideoState, video: Boolean, onSelect: (Boolean) ->
             enabled = videoReady || canExplain,
             dimmed = !videoReady,
             busy = state is VideoState.Checking,
+            hint = videoReady && !video,
         ) {
             if (videoReady) onSelect(true) else if (canExplain) onUnavailable(state)
         }
@@ -537,7 +564,7 @@ private fun ModeToggle(state: VideoState, video: Boolean, onSelect: (Boolean) ->
 }
 
 @Composable
-private fun ModeSegment(label: String, selected: Boolean, enabled: Boolean, dimmed: Boolean, busy: Boolean, onClick: () -> Unit) {
+private fun ModeSegment(label: String, selected: Boolean, enabled: Boolean, dimmed: Boolean, busy: Boolean, hint: Boolean = false, onClick: () -> Unit) {
     Row(
         Modifier
             .clip(androidx.compose.foundation.shape.CircleShape)
@@ -551,8 +578,69 @@ private fun ModeSegment(label: String, selected: Boolean, enabled: Boolean, dimm
             label, style = T.small.copy(fontWeight = FontWeight.SemiBold),
             color = if (selected) Color.Black else Color.White.copy(alpha = if (!dimmed) 1f else 0.50f),
         )
+        // A video exists for this song and isn't showing: a small accent dot says "tap me".
+        if (hint) Box(Modifier.size(6.dp).clip(androidx.compose.foundation.shape.CircleShape).background(P.colors.accent))
         if (busy) androidx.compose.material3.CircularProgressIndicator(
             modifier = Modifier.size(11.dp), strokeWidth = 1.5.dp, color = Color.White.copy(alpha = 0.8f),
         )
     }
+}
+
+
+/**
+ * Choose a song's video by hand. Used when the automatic match found nothing (or the wrong clip):
+ * the same YouTube video search the Search tab uses, right inside the player. The choice is kept
+ * for this song and the player switches to Video as soon as it is ready.
+ */
+@Composable
+private fun VideoPickerDialog(vm: MainViewModel, song: com.skarif.kairos.data.db.SongEntity, onDismiss: () -> Unit) {
+    val c = P.colors
+    var results by remember(song.id) { androidx.compose.runtime.mutableStateOf<List<com.skarif.kairos.data.db.SongEntity>?>(null) }
+    var failed by remember(song.id) { androidx.compose.runtime.mutableStateOf(false) }
+    LaunchedEffect(song.id) {
+        try {
+            results = vm.videoChoices(song)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            failed = true
+        }
+    }
+    com.skarif.kairos.ui.components.KairosDialog(
+        onDismissRequest = onDismiss,
+        containerColor = c.sheet,
+        title = { Text("Pick a video", color = c.text) },
+        text = {
+            val list = results
+            when {
+                failed -> Text("Couldn't search YouTube right now. Check the connection and try again.", color = c.muted, style = T.body)
+                list == null -> androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = c.accent,
+                )
+                list.isEmpty() -> Text("No videos came up for this song.", color = c.muted, style = T.body)
+                else -> androidx.compose.foundation.lazy.LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    val shown = list.take(12)
+                    items(shown.size) { i ->
+                        val v = shown[i]
+                        Column(
+                            Modifier.fillMaxWidth()
+                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                .clickable {
+                                    vm.chooseVideo(song, v.fileName)
+                                    onDismiss()
+                                }
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                        ) {
+                            Text(v.title, color = c.text, style = T.body.copy(fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                listOf(v.artist, if (v.durationMs > 0) formatTime(v.durationMs) else "").filter { it.isNotBlank() }.joinToString(" · "),
+                                color = c.muted, style = T.small, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onDismiss) { Text("Cancel", color = c.muted) } },
+    )
 }

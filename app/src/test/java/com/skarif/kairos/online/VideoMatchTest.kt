@@ -82,4 +82,15 @@ class VideoMatchTest {
         assertEquals("Song", VideoMatch.coreTitle("Song [Remastered 2011]"))
         assertEquals("Song", VideoMatch.coreTitle("Song - From the film X"))
     }
+
+    @Test
+    fun relaxedPassFindsASlightlyOffTitleButStillRejectsCovers() {
+        val song = "Tum Hi Ho Aashiqui Remastered Version"
+        val loose = listOf(VideoMatch.Candidate("Tum Hi Ho Aashiqui 2 Official Video", "T-Series", 262, 1_000_000))
+        // Strict pass allows one missing word; the relaxed pass tolerates the extras a streaming title adds.
+        assertNull(VideoMatch.pick(song, "Arijit Singh", 262, loose))
+        assertEquals(0, VideoMatch.pick(song, "Arijit Singh", 262, loose, relaxed = true))
+        val cover = listOf(VideoMatch.Candidate("Tum Hi Ho Aashiqui cover", "Someone", 262, 5_000))
+        assertNull(VideoMatch.pick(song, "Arijit Singh", 262, cover, relaxed = true))
+    }
 }

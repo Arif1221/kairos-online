@@ -290,7 +290,13 @@ fun PlayerSheet(
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(lifecycleOwner, open) {
         vm.setPlayerOpen(open)
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, e -> if (e == androidx.lifecycle.Lifecycle.Event.ON_STOP) vm.dropVideo() }
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            when (e) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> vm.pauseVideoForBackground()
+                androidx.lifecycle.Lifecycle.Event.ON_START -> vm.resumeVideoIfPreferred()
+                else -> Unit
+            }
+        }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
@@ -342,7 +348,7 @@ fun PlayerSheet(
         val h = constraints.maxHeight.toFloat()
         val px = { d: Float -> with(density) { d.dp.toPx() } }
         ctrl.coverWidth = w
-        val miniH = px(64f)
+        val miniH = px(76f)
         val inset = px(14f)
         val miniTop = h - miniBottomPx - miniH
         ctrl.rangePx = miniTop.coerceAtLeast(1f)
@@ -371,7 +377,7 @@ fun PlayerSheet(
         fun artRect(): Rect {
             val p = ctrl.progress.value
             val sr = sheetRect(0f)
-            val mini = Rect(sr.left + px(8f), sr.top + px(8f), sr.left + px(56f), sr.top + px(56f))
+            val mini = Rect(sr.left + px(8f), sr.top + px(8f), sr.left + px(68f), sr.top + px(68f))
             val full = pageRect.value.let { r ->
                 if (ctrl.page == PlayerPage.MAIN) r.translate(0f, -ctrl.mainScroll.value.toFloat()) else r
             }.translate(0f, sheetRect(p).top) // rides down with the sheet while it's dragged
@@ -396,6 +402,8 @@ fun PlayerSheet(
         ) {
             Box(
                 Modifier.fillMaxSize()
+                    // Cached as one texture, so scrolling the player page doesn't redraw the whole backdrop each frame.
+                    .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
                     .drawBehind { drawRect(lerp(miniBg, c.bg, ctrl.progress.value)) }
                     .backdrop { ctrl.progress.value },
             )
@@ -420,7 +428,7 @@ fun PlayerSheet(
                     },
                 ) { ctrl.expand() },
         ) {
-            MiniContent(vm, ctrl, s.title, s.artist, now.isPlaying, now.durationMs.takeIf { it > 0 } ?: s.durationMs)
+            MiniContent(vm, ctrl, s.id, s.title, s.artist, now.isPlaying, now.durationMs.takeIf { it > 0 } ?: s.durationMs)
         }
 
         // 2. The cover, morphing between the mini player, the hero and each page's thumbnail.
@@ -497,7 +505,7 @@ fun PlayerSheet(
             ) {
                 if (img != null) Image(img, desc, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                 // Video mode: the video over the cover, on the hero only (not the small thumbnails of the other pages).
-                if (offset == 0 && ctrl.page == PlayerPage.MAIN && wantsVideo) VideoLayer(vm, ctrl.videoFill) { ctrl.videoFill = !ctrl.videoFill }
+                if (offset == 0 && ctrl.page == PlayerPage.MAIN && wantsVideo) VideoLayer(vm, ctrl.videoFill, showSubtitles = ctrl.isOpen) { ctrl.videoFill = !ctrl.videoFill }
             }
         }
         // Neighbours only once the cover has settled in the hero; during the move between pages
@@ -599,17 +607,30 @@ fun PlayerSheet(
 /** Collapsed row: title, artist, play/pause, next, and a thin progress line. Fades out as it opens. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MiniContent(vm: MainViewModel, ctrl: PlayerController, title: String, artist: String, playing: Boolean, durationMs: Long) {
+private fun MiniContent(vm: MainViewModel, ctrl: PlayerController, songId: Long, title: String, artist: String, playing: Boolean, durationMs: Long) {
     val c = P.colors
+    val favs by vm.favorites.collectAsStateWithLifecycle()
+    val liked = songId in favs
     val pos = vm.position.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     var nudge by remember { mutableFloatStateOf(0f) }
     val nudgeAnim = remember { Animatable(0f) }
+    // The current synced lyric line replaces the artist while it plays (Settings > Lyrics in the mini player).
+    val miniSettings by vm.settings.collectAsStateWithLifecycle()
+    val lyricsState by vm.lyrics.collectAsStateWithLifecycle()
+    val lyricsOffset by vm.lyricsOffset.collectAsStateWithLifecycle()
+    val syncedLyrics = (lyricsState as? com.skarif.kairos.ui.LyricsState.Ready)?.lyrics?.takeIf { it.synced && !it.isEmpty() }
+    val subtitle by remember(syncedLyrics, miniSettings.miniLyrics, playing, lyricsOffset, artist) {
+        derivedStateOf {
+            val i = if (miniSettings.miniLyrics && playing && syncedLyrics != null) syncedLyrics.indexAt(pos.value - lyricsOffset) else -1
+            (if (i >= 0) syncedLyrics?.lines?.get(i)?.text?.trim() else null).takeUnless { it.isNullOrEmpty() } ?: artist
+        }
+    }
     Box(
         Modifier
             .fillMaxWidth()
-            .height(64.dp)
+            .height(76.dp)
             .graphicsLayer {
                 alpha = (1f - ctrl.progress.value * 4f).coerceIn(0f, 1f)
                 translationX = nudgeAnim.value
@@ -647,17 +668,23 @@ private fun MiniContent(vm: MainViewModel, ctrl: PlayerController, title: String
             },
     ) {
         Row(
-            Modifier.fillMaxSize().padding(start = 8.dp, end = 8.dp),
+            Modifier.fillMaxSize().padding(start = 8.dp, end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Spacer(Modifier.width(48.dp)) // the cover is drawn here by the cover layer
+            Spacer(Modifier.width(60.dp)) // the cover is drawn here by the cover layer
             Column(Modifier.weight(1f)) {
                 Text(title, style = T.title, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(artist, style = T.small.copy(fontSize = 13.sp), color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, style = T.small.copy(fontSize = 13.sp), color = if (subtitle == artist) c.muted else c.accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+            CircleButton(
+                if (liked) Ic.HeartFilled else Ic.Heart,
+                if (liked) "Remove from favourites" else "Add to favourites",
+                { vm.toggleFavorite(songId) },
+                size = 38.dp, container = Color.Transparent, content = if (liked) c.accent else c.text,
+            )
             CircleButton(if (playing) Ic.Pause else Ic.Play, if (playing) "Pause" else "Play", vm::toggle, size = 46.dp, container = c.ink, content = c.inkFg)
-            CircleButton(Ic.Next, "Next song", vm::next, size = 42.dp, container = Color.Transparent)
+            CircleButton(Ic.Next, "Next song", vm::next, size = 38.dp, container = Color.Transparent)
         }
     }
 }
