@@ -73,6 +73,9 @@ interface OnlineMusic {
     /** Shown in the UI, e.g. "YouTube Music". */
     val name: String
 
+    /** Gives the online backend an application context at startup before any cache/prefs call. */
+    fun init(context: Context) {}
+
     /** Search-as-you-type completions. Never throws; empty on failure. */
     suspend fun suggestions(query: String): List<String>
 
@@ -97,6 +100,30 @@ interface OnlineMusic {
     /** The Uri handed to the player; [dataSourceFactory] turns it into a real stream. */
     fun mediaUri(song: SongEntity): Uri
 
+    /**
+     * The YouTube video id that shows [song] as a video: its own id when it already is a video,
+     * else the matching music video found by search; null when there is none. Throws on network errors.
+     */
+    suspend fun videoFor(song: SongEntity): String?
+
+    /** Like [mediaUri], but the player gets the picture too. Streams the video's own sound. */
+    fun videoUri(videoId: String): Uri
+
+    /** Resolve and cache a small startup range for the current song's video while audio continues. */
+    suspend fun prefetchVideo(context: Context, song: SongEntity, quality: StreamQuality) {}
+
+    /** Resolve the next song's video match and stream metadata without downloading media bytes. */
+    suspend fun prefetchVideoMetadata(song: SongEntity, quality: StreamQuality) {}
+
+    /** The sound of [videoId] alone (cached like the song's), merged with the picture for video mode. */
+    fun audioUri(videoId: String): Uri
+
+    /**
+     * Forgets the stream address saved for the song or video behind [uri], so the next open asks
+     * YouTube for a fresh one. Addresses stop working when the network changes or they age out.
+     */
+    fun forgetStream(uri: Uri)
+
     /** True when the whole song is in the stream cache, so it plays without a connection. */
     fun isCached(context: Context, song: SongEntity): Boolean
 
@@ -113,15 +140,26 @@ interface OnlineMusic {
      */
     suspend fun download(context: Context, song: SongEntity, quality: StreamQuality, progress: (Float) -> Unit)
 
+    /** Downloads the matched video picture and its own audio for offline video playback. */
+    suspend fun downloadVideo(context: Context, song: SongEntity, quality: StreamQuality, progress: (Float) -> Unit) {
+        throw UnsupportedOperationException("Video downloads are not supported by this source")
+    }
+
     fun isDownloaded(context: Context, song: SongEntity): Boolean
 
     /** Video ids ([SongEntity.fileName]) of every finished download. Call off the main thread. */
     fun downloadedIds(context: Context): Set<String>
 
+    /** Video ids with a complete persistent picture download. */
+    fun downloadedVideoIds(context: Context): Set<String> = emptySet()
+
     fun downloadBytes(context: Context): Long
 
     /** Deletes a download, finished or partial, by video id. Call off the main thread. */
     fun removeDownload(context: Context, videoId: String)
+
+    /** Removes only a partially/fully saved video companion, preserving the song audio download. */
+    fun removeVideoDownload(context: Context, songId: String) { removeDownload(context, songId) }
 
     /** How much room recently streamed songs may take; trims at once if it shrank. Call off the main thread. */
     fun setCacheLimit(context: Context, bytes: Long)

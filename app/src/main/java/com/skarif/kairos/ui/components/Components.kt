@@ -150,16 +150,19 @@ fun CircleButton(
     content: Color = P.colors.text,
     iconSize: Dp = 20.dp,
 ) {
+    val c = P.colors
     val interaction = remember { MutableInteractionSource() }
     val view = androidx.compose.ui.platform.LocalView.current
     val bg by animateColorAsState(container, tween(250), label = "circleBg")
     val fg by animateColorAsState(content, tween(250), label = "circleFg")
+    val needsBorder = container == c.card || container == c.chip
     Box(
         modifier
             .size(size)
             .pressScale(interaction)
             .clip(CircleShape)
             .background(bg)
+            .then(if (needsBorder) Modifier.border(1.dp, c.line.copy(alpha = if (c.dark) 0.30f else 0.20f), CircleShape) else Modifier)
             .clickable(interactionSource = interaction, indication = ripple(), role = Role.Button) { view.tick(); onClick() },
         contentAlignment = Alignment.Center,
     ) {
@@ -201,10 +204,11 @@ fun Pill(
     val fgA by animateColorAsState(fg, tween(250), label = "pillFg")
     Row(
         modifier
-            .height(if (big) 60.dp else 46.dp)
+            .height(if (big) 60.dp else 44.dp)
             .pressScale(interaction, 0.96f)
             .clip(RoundedCornerShape(50))
             .background(bgA)
+            .then(if (!accent && !selected) Modifier.border(1.dp, c.line.copy(alpha = if (c.dark) 0.30f else 0.20f), RoundedCornerShape(50)) else Modifier)
             .clickable(interactionSource = interaction, indication = ripple(), role = Role.Button) { view.tick(); onClick() }
             .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -242,12 +246,12 @@ fun WaveformSeek(
     seed: Long,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
-    barsHeight: Dp = 66.dp,
-    bars: Int = 26,
+    barsHeight: Dp = 56.dp,
+    bars: Int = 36,
     playing: Boolean = false,
 ) {
     val c = P.colors
-    val heights = remember(seed, bars) { val r = Random(seed); List(bars) { 0.3f + r.nextFloat() * 0.7f } }
+    val heights = remember(seed, bars) { val r = Random(seed); List(bars) { 0.25f + r.nextFloat() * 0.75f } }
     // New song: the bars grow up from the baseline one after another, left to right.
     val appear = remember { androidx.compose.animation.core.Animatable(0f) }
     LaunchedEffect(seed) { appear.snapTo(0f); appear.animateTo(1f, tween(700, easing = FastOutSlowInEasing)) }
@@ -267,15 +271,16 @@ fun WaveformSeek(
     }
     var widthPx by remember { mutableIntStateOf(0) }
     var tipW by remember { mutableIntStateOf(0) }
-    val tipScale by animateFloatAsState(if (scrub != null) 1.18f else 1f, spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium), label = "tip")
+    val tipScale by animateFloatAsState(if (scrub != null) 1f else 0f, spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMedium), label = "tip")
     fun xToFrac(x: Float) = if (widthPx > 0) (x / widthPx).coerceIn(0f, 1f) else 0f
     Column(
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
-            .background(c.accent)
-            .padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .background(c.card.copy(alpha = if (c.dark) 0.72f else 0.88f))
+            .border(1.dp, c.line.copy(alpha = if (c.dark) 0.35f else 0.25f), RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
+            .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Box(
             Modifier
@@ -297,80 +302,65 @@ fun WaveformSeek(
                 },
         ) {
             Canvas(Modifier.fillMaxSize()) {
-                val gap = 4.dp.toPx()
+                val gap = 3.dp.toPx()
                 val w = (size.width - gap * (bars - 1)) / bars
                 val playX = frac() * size.width
                 val t = clock.value
-                val radius = CornerRadius(minOf(w / 2, 8.dp.toPx()))
-                val hatch = c.onAccent.copy(alpha = 0.38f)
-                val solid = c.onAccent.copy(alpha = 0.95f)
-                val step = 6.dp.toPx()
+                val radius = CornerRadius(minOf(w / 2, 6.dp.toPx()))
+                val unplayedColor = c.muted.copy(alpha = if (c.dark) 0.28f else 0.24f)
+                val playedColor = c.accent
                 val a = appear.value
                 val rects = heights.mapIndexed { i, h ->
                     val left = i * (w + gap)
                     val cx = left + w / 2
-                    // Grow in, staggered left to right.
                     val grow = ((a * 1.6f) - i.toFloat() / bars * 0.6f).coerceIn(0f, 1f)
-                    // Playing: a soft wave travels through the played part, and the bars at the
-                    // playhead pulse like a level meter. Paused: everything settles.
-                    val near = (1f - kotlin.math.abs(cx - playX) / (w * 3.5f)).coerceIn(0f, 1f)
+                    val near = (1f - kotlin.math.abs(cx - playX) / (w * 4.5f)).coerceIn(0f, 1f)
                     val played = cx < playX
                     val wave = if (played) 0.06f * kotlin.math.sin(t * 4.2f - i * 0.55f) else 0.02f * kotlin.math.sin(t * 1.4f + i * 0.4f)
                     val beat = 0.5f + 0.5f * kotlin.math.sin(t * 9.1f + i * 1.3f) * kotlin.math.sin(t * 2.7f + i * 0.8f)
-                    // Scrubbing: a lens lifts the bars under your finger.
-                    val lensK = lens * (1f - (kotlin.math.abs(cx - playX) / (w * 2.5f)).coerceIn(0f, 1f))
+                    val lensK = lens * (1f - (kotlin.math.abs(cx - playX) / (w * 3f)).coerceIn(0f, 1f))
                     val scale = 1f + motion * (wave + near * near * (beat * 0.28f - 0.06f)) + lensK * 0.35f
                     val bh = (size.height * h * scale * grow).coerceIn(w, size.height)
-                    RoundRect(left, size.height - bh, left + w, size.height, radius)
+                    // Center-aligned bars look cleaner and more modern than bottom-aligned bars.
+                    val top = (size.height - bh) / 2f
+                    RoundRect(left, top, left + w, top + bh, radius)
                 }
-                // Unplayed: hatched.
-                rects.forEach { r ->
-                    clipPath(Path().apply { addRoundRect(r) }) {
-                        var x = r.left - r.height
-                        while (x < r.right) {
-                            drawLine(hatch, Offset(x, size.height), Offset(x + r.height, r.top), strokeWidth = 2.dp.toPx())
-                            x += step
-                        }
-                    }
-                }
-                // Played: solid, cut at the exact position so it fills smoothly through a bar.
+                rects.forEach { r -> drawPath(Path().apply { addRoundRect(r) }, unplayedColor) }
                 clipRect(right = playX) {
-                    rects.forEach { r -> drawPath(Path().apply { addRoundRect(r) }, solid) }
+                    rects.forEach { r -> drawPath(Path().apply { addRoundRect(r) }, playedColor) }
                 }
-                // Playhead with a soft halo that breathes while music plays.
-                val ph = 4.dp.toPx()
-                val halo = (6.dp.toPx() + motion * 3.dp.toPx() * (0.5f + 0.5f * kotlin.math.sin(t * 3f))) * (1f + lens)
+                val ph = 3.dp.toPx()
+                val halo = (5.dp.toPx() + motion * 3.dp.toPx() * (0.5f + 0.5f * kotlin.math.sin(t * 3f))) * (1f + lens)
                 drawRoundRect(
-                    Color(0xFF151515).copy(alpha = 0.18f), Offset((playX - halo).coerceIn(0f, size.width - 2 * halo), 0f),
+                    c.accent.copy(alpha = 0.26f), Offset((playX - halo).coerceIn(0f, size.width - 2 * halo), 0f),
                     Size(2 * halo, size.height), CornerRadius(halo),
                 )
                 drawRoundRect(
-                    Color(0xFF151515), Offset((playX - ph / 2).coerceIn(0f, size.width - ph), 0f),
+                    c.text, Offset((playX - ph / 2).coerceIn(0f, size.width - ph), 0f),
                     Size(ph, size.height), CornerRadius(ph / 2),
                 )
             }
-            if (widthPx > 0) {
+            if (widthPx > 0 && scrub != null) {
                 Text(
                     formatTime(shownSec * 1000),
-                    style = T.small.copy(fontWeight = FontWeight.Bold),
-                    color = Color(0xFF151515),
+                    style = T.num,
+                    color = c.onAccent,
                     modifier = Modifier
                         .onSizeChanged { tipW = it.width }
                         .offset {
-                            // Read in the layout phase: the tip follows the playhead without recomposing.
                             val tipX = ((frac() * widthPx) - tipW / 2f).roundToInt().coerceIn(0, (widthPx - tipW).coerceAtLeast(0))
-                            IntOffset(tipX, (-24).dp.roundToPx())
+                            IntOffset(tipX, (-28).dp.roundToPx())
                         }
-                        .graphicsLayer { scaleX = tipScale; scaleY = tipScale; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f) }
+                        .graphicsLayer { scaleX = tipScale; scaleY = tipScale; alpha = tipScale.coerceIn(0f, 1f); transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f) }
                         .clip(RoundedCornerShape(50))
-                        .background(Color.White)
+                        .background(c.accent)
                         .padding(horizontal = 10.dp, vertical = 4.dp),
                 )
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(formatTime(shownSec * 1000), style = T.small.copy(fontWeight = FontWeight.SemiBold), color = c.onAccent)
-            Text("−" + formatTime((durationMs - shownSec * 1000).coerceAtLeast(0)), style = T.small.copy(fontWeight = FontWeight.SemiBold), color = c.onAccent)
+            Text(formatTime(shownSec * 1000), style = T.num, color = c.text)
+            Text("−" + formatTime((durationMs - shownSec * 1000).coerceAtLeast(0)), style = T.num, color = c.muted)
         }
     }
 }
@@ -592,13 +582,15 @@ fun BoxScope.CompactTitleBar(title: String, visible: Boolean, onTop: () -> Unit)
         exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(120)) +
             androidx.compose.animation.slideOutVertically(com.skarif.kairos.ui.motion.Motion.snappy()) { -it / 2 },
     ) {
-        Box(
+        Column(
             Modifier.fillMaxWidth().background(panel)
                 .clickable(onClickLabel = "Scroll to top", role = Role.Button, onClick = onTop)
-                .statusBarsPadding().padding(vertical = 14.dp),
-            contentAlignment = Alignment.Center,
+                .statusBarsPadding(),
         ) {
-            Text(title, style = T.title, color = c.text, maxLines = 1)
+            Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                Text(title, style = T.title, color = c.text, maxLines = 1)
+            }
+            Box(Modifier.fillMaxWidth().height(0.8.dp).background(c.line.copy(alpha = 0.25f)))
         }
     }
 }
@@ -706,7 +698,7 @@ fun TabHeader(
     val chip = c.chip
     Column(
         modifier.headerPanel(pull),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             left(chip)

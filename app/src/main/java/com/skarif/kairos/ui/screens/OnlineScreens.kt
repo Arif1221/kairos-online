@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -57,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.skarif.kairos.data.db.SongEntity
+import com.skarif.kairos.data.DownloadMode
 import com.skarif.kairos.online.OnlineArtist
 import com.skarif.kairos.online.OnlineCollection
 import com.skarif.kairos.online.OnlineItem
@@ -476,8 +478,13 @@ fun ExploreScreen(
 @Composable
 private fun Banner(title: String, text: String, action: (@Composable () -> Unit)? = null) {
     val c = P.colors
+    val hairline = c.line.copy(alpha = if (c.dark) 0.45f else 0.30f)
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 18.dp).clip(RoundedCornerShape(24.dp)).background(c.card).padding(16.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 18.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(c.card.copy(alpha = if (c.dark) 0.85f else 0.92f))
+            .border(1.dp, hairline, RoundedCornerShape(24.dp))
+            .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -687,8 +694,16 @@ fun OnlineArtistScreen(vm: MainViewModel, id: String, name: String, onBack: () -
 @Composable
 private fun DownloadAllRow(vm: MainViewModel, songs: List<SongEntity>) {
     val done by vm.onlineUi.downloadedIds.collectAsStateWithLifecycle()
+    val videoDone by vm.onlineUi.downloadedVideoIds.collectAsStateWithLifecycle()
     val busy by vm.onlineUi.downloading.collectAsStateWithLifecycle()
-    val have = songs.count { it.id in done }
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val mode = if (settings.rememberDownloadChoice) settings.downloadMode else DownloadMode.AUDIO_ONLY
+    val phone by vm.onlineUi.savedToPhoneIds.collectAsStateWithLifecycle()
+    val have = when (mode) {
+        DownloadMode.SAVE_TO_PHONE -> songs.count { it.id in phone }
+        DownloadMode.AUDIO_ONLY -> songs.count { it.id in done }
+        DownloadMode.AUDIO_VIDEO -> songs.count { it.id in done && it.id in videoDone }
+    }
     val going = songs.count { it.id in busy }
     val label = when {
         have == songs.size -> "All ${songs.size} downloaded"
@@ -696,7 +711,6 @@ private fun DownloadAllRow(vm: MainViewModel, songs: List<SongEntity>) {
         have > 0 -> "Download the other ${songs.size - have}"
         else -> "Download all ${songs.size}"
     }
-    val phone by vm.onlineUi.savedToPhoneIds.collectAsStateWithLifecycle()
     val onPhone = songs.count { it.id in phone }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)) {
         if (going == 0) Pill(
@@ -736,10 +750,10 @@ fun DownloadsScreen(vm: MainViewModel, onBack: () -> Unit, onOpenNowPlaying: () 
                     com.skarif.kairos.ui.components.HintCard(
                         "downloads", "Download or Save to phone?",
                         listOf(
-                            "Download keeps a song inside Kairos. It plays offline, but only in Kairos. These are listed here.",
-                            "Save to phone makes an M4A file in Music/Kairos that any app can play. Those show in Library, under the songs on this phone.",
-                            "On a song: ↓ download · ring = downloading (tap to cancel) · ✓ on this phone.",
-                            "Settings > Downloads & storage picks what the ↓ button does.",
+                            "Audio only keeps the song inside Kairos for offline music. Audio + video also saves the matched music video for offline video playback.",
+                            "Save to phone makes an M4A audio file in Music/Kairos that any app can play. It appears in your phone library.",
+                            "On a song: ↓ download · ring = downloading (tap to cancel) · ✓ = saved for the selected option.",
+                            "Choose an option from the ↓ button. Turn on Remember my choice in the dialog or Settings > Downloads & storage to skip the prompt next time.",
                         ),
                         inset = 0.dp,
                     )
@@ -780,31 +794,71 @@ fun DownloadButton(
     val busyMap = o.downloading.collectAsStateWithLifecycle()
     val doneSet = o.downloadedIds.collectAsStateWithLifecycle()
     val phoneSet = o.savedToPhoneIds.collectAsStateWithLifecycle()
+    val videoSet = o.downloadedVideoIds.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
     val progress by remember(song.id) { derivedStateOf { busyMap.value[song.id] } }
-    val done by remember(song.id) { derivedStateOf { song.id in doneSet.value || song.id in phoneSet.value } }
+    val done by remember(song.id, settings.downloadMode, settings.rememberDownloadChoice) { derivedStateOf {
+        when (if (settings.rememberDownloadChoice) settings.downloadMode else DownloadMode.AUDIO_ONLY) {
+            DownloadMode.SAVE_TO_PHONE -> song.id in phoneSet.value
+            DownloadMode.AUDIO_ONLY -> song.id in doneSet.value || song.id in phoneSet.value
+            DownloadMode.AUDIO_VIDEO -> song.id in doneSet.value && song.id in videoSet.value
+        }
+    } }
+    var showChoice by remember(song.id) { mutableStateOf(false) }
+    var rememberChoice by remember(song.id) { mutableStateOf(false) }
     val accent = P.colors.accent
-    val p = progress
+
+    fun choose(mode: DownloadMode) {
+        vm.updateSettings { it.copy(downloadMode = mode, rememberDownloadChoice = rememberChoice) }
+        o.download(listOf(song), mode)
+        showChoice = false
+    }
+
     Box(contentAlignment = Alignment.Center) {
         CircleButton(
-            when { p != null -> Ic.Close; done -> Ic.Check; else -> Ic.DownArrow },
-            when { p != null -> "Cancel download"; done -> "Downloaded"; else -> "Download" },
+            when { progress != null -> Ic.Close; done -> Ic.Check; else -> Ic.DownArrow },
+            when { progress != null -> "Cancel download"; done -> "Download options"; else -> "Download" },
             {
                 when {
-                    p != null -> o.cancelDownload(song)
-                    done -> vm.notify("On this phone. Hold the song to remove or save it elsewhere.")
-                    else -> o.download(listOf(song))
+                    progress != null -> o.cancelDownload(song)
+                    settings.rememberDownloadChoice -> o.download(listOf(song), settings.downloadMode)
+                    else -> { rememberChoice = false; showChoice = true }
                 }
             },
-            modifier = if (p != null) Modifier.drawBehind {
+            modifier = if (progress != null) Modifier.drawBehind {
                 val stroke = 2.5.dp.toPx()
                 drawArc(
-                    accent, -90f, 360f * p.coerceAtLeast(0.03f), false,
+                    accent, -90f, 360f * progress!!.coerceAtLeast(0.03f), false,
                     topLeft = androidx.compose.ui.geometry.Offset(stroke / 2, stroke / 2),
                     size = androidx.compose.ui.geometry.Size(this.size.width - stroke, this.size.height - stroke),
                     style = androidx.compose.ui.graphics.drawscope.Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round),
                 )
             } else Modifier,
-            size = size, container = container, content = if (done && p == null) accent else content, iconSize = size * 0.45f,
+            size = size, container = container, content = if (done && progress == null) accent else content, iconSize = size * 0.45f,
+        )
+    }
+
+    if (showChoice) {
+        KairosDialog(
+            onDismissRequest = { showChoice = false },
+            containerColor = P.colors.sheet,
+            title = { Text("Download ${song.title}", style = T.h2, color = P.colors.text, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Choose what Kairos should save.", style = T.body, color = P.colors.muted)
+                    Pill("Audio + video · Offline video", { choose(DownloadMode.AUDIO_VIDEO) }, icon = Ic.DownArrow)
+                    Pill("Audio only · Offline music", { choose(DownloadMode.AUDIO_ONLY) }, icon = Ic.Music)
+                    Pill("Save audio to phone · M4A", { choose(DownloadMode.SAVE_TO_PHONE) }, icon = Ic.Folder)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().cardClick("Remember download choice") { rememberChoice = !rememberChoice }.padding(vertical = 4.dp)) {
+                        androidx.compose.material3.Checkbox(checked = rememberChoice, onCheckedChange = { rememberChoice = it })
+                        Column(Modifier.weight(1f)) {
+                            Text("Remember for next songs", style = T.title, color = P.colors.text)
+                            Text("Use this option automatically for future Download taps. Change it in Settings.", style = T.small, color = P.colors.muted)
+                        }
+                    }
+                }
+            },
+            confirmButton = { Pill("Cancel", { showChoice = false }) },
         )
     }
 }

@@ -31,6 +31,8 @@ enum class OnlineLyricsType { SYNCED, PLAIN }
 enum class ReplayGainMode { OFF, TRACK, ALBUM }
 /** Streaming quality for the online source. [kbps] is what YouTube typically serves at that tier. */
 enum class StreamQuality(val label: String, val kbps: Int) { LOW("Data saver", 50), NORMAL("Normal", 128), HIGH("High", 160) }
+/** What the online Download action should save when the user chooses to remember it. */
+enum class DownloadMode { AUDIO_ONLY, AUDIO_VIDEO, SAVE_TO_PHONE }
 enum class SongSort(val label: String) {
     TITLE("Title"), ARTIST("Artist"), ALBUM("Album"), DATE_ADDED("Date added"), LENGTH("Length"), MOST_PLAYED("Most played")
 }
@@ -84,7 +86,9 @@ data class Settings(
     /** Online flavor only: online search starts on Videos instead of Songs. */
     val searchVideosFirst: Boolean = false,
     /** Online flavor only: the Download button saves an M4A file to Music/Kairos instead of keeping it in the app. */
-    val downloadToPhone: Boolean = false,
+    val downloadToPhone: Boolean = false, // Legacy preference retained for migration compatibility.
+    val downloadMode: DownloadMode = DownloadMode.AUDIO_ONLY,
+    val rememberDownloadChoice: Boolean = false,
     /** Online flavor only: room for recently streamed songs, in MB. */
     val streamCacheMb: Int = 1024,
 ) {
@@ -131,6 +135,8 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
         val dataSaver = booleanPreferencesKey("data_saver_mobile")
         val videosFirst = booleanPreferencesKey("search_videos_first")
         val downloadToPhone = booleanPreferencesKey("download_to_phone")
+        val downloadMode = stringPreferencesKey("download_mode")
+        val rememberDownloadChoice = booleanPreferencesKey("remember_download_choice")
         val streamCacheMb = androidx.datastore.preferences.core.intPreferencesKey("stream_cache_mb")
     }
 
@@ -182,6 +188,8 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
             dataSaverOnMobile = p[K.dataSaver] ?: d.dataSaverOnMobile,
             searchVideosFirst = p[K.videosFirst] ?: d.searchVideosFirst,
             downloadToPhone = p[K.downloadToPhone] ?: d.downloadToPhone,
+            downloadMode = enumOr(p[K.downloadMode], if (p[K.downloadToPhone] == true) DownloadMode.SAVE_TO_PHONE else d.downloadMode),
+            rememberDownloadChoice = p[K.rememberDownloadChoice] ?: (p[K.downloadToPhone] != null),
             streamCacheMb = p[K.streamCacheMb] ?: d.streamCacheMb,
         )
     }
@@ -220,7 +228,8 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
         p[K.streamQuality] = s.streamQuality.name
         p[K.dataSaver] = s.dataSaverOnMobile
         p[K.videosFirst] = s.searchVideosFirst
-        p[K.downloadToPhone] = s.downloadToPhone
+        p[K.downloadMode] = s.downloadMode.name
+        p[K.rememberDownloadChoice] = s.rememberDownloadChoice
         p[K.streamCacheMb] = s.streamCacheMb
     }
 

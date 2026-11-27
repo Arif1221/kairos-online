@@ -1,6 +1,7 @@
 package com.skarif.kairos.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -40,6 +42,7 @@ import com.skarif.kairos.ui.components.stretchTitle
 import kotlinx.coroutines.launch
 import com.skarif.kairos.ui.theme.P
 import com.skarif.kairos.ui.theme.T
+import com.skarif.kairos.ui.theme.mixedHeadline
 
 /** Short duration: "45s", "12m", "3h 05m". */
 fun hoursText(ms: Long): String {
@@ -96,29 +99,37 @@ fun StatsScreen(vm: MainViewModel, onMenu: () -> Unit, onSettings: () -> Unit) {
                 pull = { band.pull },
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(hoursText(st.totalMs) + " listened", Modifier.stretchTitle { band.pull }, style = T.big, color = c.text)
-                    Text(st.change, style = T.small, color = c.muted)
+                    Text(
+                        mixedHeadline(hoursText(st.totalMs) to false, " listened" to true),
+                        Modifier.stretchTitle { band.pull },
+                        style = T.h1.copy(fontSize = 36.sp, lineHeight = 40.sp),
+                        color = c.text,
+                    )
+                    Text(st.change, style = T.small.copy(fontFeatureSettings = "tnum"), color = c.muted)
+                }
+                if (st.plays > 0) Row {
+                    com.skarif.kairos.ui.components.Pill("Play $rangeName story", { story = true }, icon = Ic.Play, accent = true)
                 }
             }
-            Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            // Wrapped, any time: the range below as a story you can swipe through and share.
-            if (st.plays > 0) com.skarif.kairos.ui.components.Pill(
-                "Play your $rangeName as a story", { story = true }, icon = Ic.Play, accent = true, big = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            val hairline = c.line.copy(alpha = if (c.dark) 0.45f else 0.30f)
+            val cardBg = c.card.copy(alpha = if (c.dark) 0.85f else 0.92f)
+            Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card)).background(c.accent).padding(14.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card)).background(c.accent).padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    StatsRange.entries.forEach { r ->
-                        val on = r == range
-                        Box(
-                            Modifier.height(38.dp).clip(RoundedCornerShape(19.dp)).background(if (on) Color.White else Color.Transparent)
-                                .selectable(on, role = Role.Tab) { vm.setStatsRange(r) }.padding(horizontal = 14.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(r.label, style = T.label.copy(fontSize = 14.sp), color = if (on) Color(0xFF151515) else c.onAccent)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("ACTIVITY", Modifier.weight(1f), style = T.kicker, color = c.onAccent.copy(alpha = 0.8f))
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        StatsRange.entries.forEach { r ->
+                            val on = r == range
+                            Box(
+                                Modifier.height(34.dp).clip(RoundedCornerShape(17.dp)).background(if (on) Color.White else Color.Transparent)
+                                    .selectable(on, role = Role.Tab) { vm.setStatsRange(r) }.padding(horizontal = 12.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(r.label, style = T.label.copy(fontSize = 13.sp), color = if (on) Color(0xFF151515) else c.onAccent)
+                            }
                         }
                     }
                 }
@@ -130,44 +141,64 @@ fun StatsScreen(vm: MainViewModel, onMenu: () -> Unit, onSettings: () -> Unit) {
                     onSelect = vm::selectBar,
                 )
             }
-            Row(Modifier, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                StatTile("Plays", "${st.plays}", Modifier.weight(1f))
-                StatTile("Different songs", "${st.uniqueSongs}", Modifier.weight(1f))
+            Row(Modifier, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatTile("PLAYS", "${st.plays}", Modifier.weight(1f))
+                StatTile("SONGS", "${st.uniqueSongs}", Modifier.weight(1f))
             }
-            Row(Modifier, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                StatTile("Daily average", hoursText(st.avgPerDayMs), Modifier.weight(1f))
-                StatTile("Day streak", plural(st.streakDays, "day"), Modifier.weight(1f))
+            Row(Modifier, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatTile("DAILY AVG", hoursText(st.avgPerDayMs), Modifier.weight(1f))
+                StatTile("STREAK", plural(st.streakDays, "day"), Modifier.weight(1f))
             }
-            Row(Modifier, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                StatTile("Played to the end", "${st.completedPct}%", Modifier.weight(1f))
-                StatTile("Usually listening at", st.peakHour.ifEmpty { "–" }, Modifier.weight(1f))
+            Row(Modifier, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatTile("COMPLETED", "${st.completedPct}%", Modifier.weight(1f))
+                StatTile("PEAK HOUR", st.peakHour.ifEmpty { "–" }, Modifier.weight(1f))
             }
 
-            Text("Top songs", style = T.h2.copy(fontSize = 24.sp), color = c.text)
-            if (st.top.isEmpty()) Text("Nothing played in this period yet.", style = T.body, color = c.muted)
-            st.top.forEachIndexed { i, t ->
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Text("${i + 1}", Modifier.width(18.dp), style = T.title, color = c.muted)
-                    SongArt(vm, t.song, 48.dp, corner = 24.dp)
-                    Column(Modifier.weight(1f)) {
-                        Text(t.song.title, style = T.title, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(plural(t.plays, "play"), style = T.small, color = c.muted)
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
+                    .background(cardBg).border(1.dp, hairline, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text("TOP SONGS", style = T.kicker, color = c.muted)
+                if (st.top.isEmpty()) Text("Nothing played in this period yet.", style = T.body, color = c.muted)
+                st.top.forEachIndexed { i, t ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            "${i + 1}",
+                            Modifier.width(20.dp),
+                            style = T.num.copy(fontWeight = FontWeight.Bold),
+                            color = if (i == 0) c.accent else c.muted,
+                        )
+                        SongArt(vm, t.song, 46.dp, corner = 14.dp)
+                        Column(Modifier.weight(1f)) {
+                            Text(t.song.title, style = T.title.copy(fontSize = 15.sp), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(plural(t.plays, "play"), style = T.small.copy(fontFeatureSettings = "tnum"), color = c.muted)
+                        }
+                        Text(hoursText(t.listenedMs), style = T.num, color = c.text)
                     }
-                    Text(hoursText(t.listenedMs), style = T.title.copy(fontSize = 17.sp), color = c.text)
                 }
             }
 
             if (st.topArtists.isNotEmpty()) {
-                Text("Top artists", style = T.h2.copy(fontSize = 24.sp), color = c.text)
-                val most = st.topArtists.first().second.coerceAtLeast(1L)
-                st.topArtists.forEach { (name, ms) ->
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row {
-                            Text(name, Modifier.weight(1f), style = T.title, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(hoursText(ms), style = T.title, color = c.text)
-                        }
-                        Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(c.card)) {
-                            Box(Modifier.fillMaxWidth(ms.toFloat() / most).height(8.dp).clip(RoundedCornerShape(4.dp)).background(c.accent))
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
+                        .background(cardBg).border(1.dp, hairline, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Text("TOP ARTISTS", style = T.kicker, color = c.muted)
+                    val most = st.topArtists.first().second.coerceAtLeast(1L)
+                    st.topArtists.forEachIndexed { i, (name, ms) ->
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("${i + 1}", style = T.num.copy(fontWeight = FontWeight.Bold), color = if (i == 0) c.accent else c.muted)
+                                Text(name, Modifier.weight(1f), style = T.title.copy(fontSize = 15.sp), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(hoursText(ms), style = T.num, color = c.text)
+                            }
+                            Box(Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(4.dp)).background(c.chip)) {
+                                Box(Modifier.fillMaxWidth(ms.toFloat() / most).height(7.dp).clip(RoundedCornerShape(4.dp)).background(c.accent))
+                            }
                         }
                     }
                 }
@@ -225,8 +256,15 @@ private fun RecapLine(label: String, value: String) {
 @Composable
 private fun StatTile(label: String, value: String, modifier: Modifier) {
     val c = P.colors
-    Column(modifier.clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)).background(c.card).padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, style = T.small, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(value, style = T.big.copy(fontSize = 28.sp, lineHeight = 30.sp), color = c.text, maxLines = 1)
+    val hairline = c.line.copy(alpha = if (c.dark) 0.45f else 0.30f)
+    Column(
+        modifier.clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+            .background(c.card.copy(alpha = if (c.dark) 0.85f else 0.92f))
+            .border(1.dp, hairline, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(label, style = T.kicker, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(value, style = T.big.copy(fontSize = 25.sp, lineHeight = 28.sp, fontFeatureSettings = "tnum"), color = c.text, maxLines = 1)
     }
 }

@@ -15,6 +15,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
@@ -67,6 +69,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.skarif.kairos.data.db.formatLabel
 import kotlinx.coroutines.launch
+import com.skarif.kairos.online.VideoState
 import com.skarif.kairos.ui.MainViewModel
 import com.skarif.kairos.ui.components.CircleButton
 import com.skarif.kairos.ui.components.Ic
@@ -108,7 +111,13 @@ fun NowPlayingPane(
         vm.reshuffle()
     }
     val sleep by vm.sleep.collectAsStateWithLifecycle()
+    // Song / Video: the video is only looked for while the player is open, and the picture is dropped
+    // (back to the sound, same second) when the player closes or the app goes to the background.
+    val videoState by vm.videoState.collectAsStateWithLifecycle()
+    val wantsVideo by vm.wantsVideo.collectAsStateWithLifecycle()
+    val wantsVideoNow = rememberUpdatedState(wantsVideo)
     val s = song ?: return
+    val showToggle = vm.onlineName != null && s.volume == com.skarif.kairos.data.db.ONLINE_VOLUME
     // Must match the cover rectangle in PlayerSheet.
     val heroHeight = (LocalConfiguration.current.screenHeightDp * 0.47f).coerceIn(300f, 440f).dp
     val scope = rememberCoroutineScope()
@@ -120,8 +129,60 @@ fun NowPlayingPane(
     val ctx = androidx.compose.ui.platform.LocalContext.current
     var menu by remember { androidx.compose.runtime.mutableStateOf(false) }
     var speedDialog by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var videoHelp by remember { androidx.compose.runtime.mutableStateOf<VideoState?>(null) }
+    val onlineNav = LocalOnlineNav.current
     if (menu) PlayerMenu(vm, s, onAlbum, { a -> onOpenCollection("artist:$a") }, onSleep, onEqualizer) { menu = false }
     if (speedDialog) SpeedDialog(vm) { speedDialog = false }
+    videoHelp?.let { st ->
+        val err = st as? VideoState.Error
+        val isError = err != null
+        com.skarif.kairos.ui.components.KairosDialog(
+            onDismissRequest = { videoHelp = null },
+            containerColor = c.sheet,
+            title = {
+                Text(
+                    if (isError) "Couldn't check for video" else "No matching video found",
+                    color = c.text,
+                )
+            },
+            text = {
+                Text(
+                    if (err != null) {
+                        "${err.reason ?: "Kairos couldn't check YouTube for a video right now."} You can retry, or search directly in Search → Online → Video."
+                    } else {
+                        "No music video matched \"${s.title}\" automatically.\n\nTo play it as a video, search for the song in Search → Online → Video."
+                    },
+                    color = c.muted,
+                    style = T.body,
+                )
+            },
+            confirmButton = {
+                if (isError) {
+                    androidx.compose.material3.TextButton({
+                        videoHelp = null
+                        vm.retryVideoCheck()
+                    }) { Text("Retry", color = c.accent) }
+                } else {
+                    androidx.compose.material3.TextButton({
+                        videoHelp = null
+                        ctrl.collapse()
+                        onlineNav.search("${s.title} ${s.artist}".trim(), com.skarif.kairos.online.OnlineKind.VIDEOS)
+                    }) { Text("Search in Video", color = c.accent) }
+                }
+            },
+            dismissButton = {
+                if (isError) {
+                    androidx.compose.material3.TextButton({
+                        videoHelp = null
+                        ctrl.collapse()
+                        onlineNav.search("${s.title} ${s.artist}".trim(), com.skarif.kairos.online.OnlineKind.VIDEOS)
+                    }) { Text("Search in Video", color = c.muted) }
+                } else {
+                    androidx.compose.material3.TextButton({ videoHelp = null }) { Text("Keep audio", color = c.muted) }
+                }
+            },
+        )
+    }
 
     // Pulling down anywhere on the player closes it once the page is scrolled to the top,
     // with the same swipe rule as the cover (before, only the cover could be dragged).
@@ -154,12 +215,17 @@ fun NowPlayingPane(
                 Box(
                     Modifier
                         .fillMaxSize()
-                        // Long-press the cover: vinyl mode on or off.
+                        // Long-press the cover: vinyl mode on or off (not over a video).
+                        // Double-tap a video: fill the cover, or fit it whole.
                         .pointerInput(Unit) {
-                            detectTapGestures(onLongPress = {
-                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                                ctrl.vinyl = !ctrl.vinyl
-                            })
+                            detectTapGestures(
+                                onDoubleTap = { if (wantsVideoNow.value) ctrl.videoFill = !ctrl.videoFill },
+                                onLongPress = {
+                                    if (wantsVideoNow.value) return@detectTapGestures
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                    ctrl.vinyl = !ctrl.vinyl
+                                },
+                            )
                         }
                         .pointerInput(s.id, hasPrev, hasNext, ctrl.vinyl) {
                             // Vinyl: turn the record to scrub. One full turn is 10 seconds of music.
@@ -213,9 +279,9 @@ fun NowPlayingPane(
                 // Scrims keep the buttons and the title readable on any cover, light or dark.
                 Box(
                     Modifier.fillMaxWidth().height(150.dp).align(Alignment.TopCenter)
-                        .background(Brush.verticalGradient(listOf(Color(0x80000000), Color.Transparent))),
+                        .background(Brush.verticalGradient(listOf(Color(0x99000000), Color.Transparent))),
                 )
-                Box(
+                if (!wantsVideo) Box(
                     Modifier.fillMaxWidth().height(240.dp).align(Alignment.BottomCenter)
                         .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0x66000000), Color(0xC7000000)))),
                 )
@@ -225,18 +291,37 @@ fun NowPlayingPane(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CircleButton(Ic.Down, "Close player", { ctrl.collapse() }, container = Color(0x59000000), content = Color.White)
-                    // "Playing from": where this queue came from, like Spotify's header.
-                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("PLAYING FROM", style = T.small.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp), color = Color.White.copy(alpha = 0.8f))
-                        Text(from ?: s.album, style = T.small.copy(fontWeight = FontWeight.SemiBold), color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (showToggle) {
+                        // Online songs: Song | Video, like YouTube Music. ("Playing from" moves to the cover's caption.)
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                            ModeToggle(
+                                videoState,
+                                wantsVideo,
+                                onSelect = { video ->
+                                    if (video) ctrl.vinyl = false // a record and a video can't share the cover
+                                    vm.setVideo(video)
+                                },
+                                onUnavailable = { st -> videoHelp = st },
+                            )
+                        }
+                    } else {
+                        // "Playing from": where this queue came from, like Spotify's header.
+                        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("PLAYING FROM", style = T.kicker, color = Color.White.copy(alpha = 0.8f))
+                            Text(from ?: s.album, style = T.small.copy(fontWeight = FontWeight.SemiBold), color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                     CircleButton(Ic.Lyrics, "Lyrics", onLyrics, container = Color(0x59000000), content = Color.White)
                     CircleButton(Ic.Menu, "More options", { menu = true }, container = Color(0x59000000), content = Color.White)
                 }
-                Column(
+                if (!wantsVideo) Column(
                     Modifier.align(Alignment.BottomStart).padding(start = 22.dp, bottom = 34.dp, end = 110.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
+                    if (showToggle) Text(
+                        "Playing from ${from ?: s.album}", style = T.small, color = Color.White.copy(alpha = 0.8f),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Icon(Ic.Music, null, tint = Color.White, modifier = Modifier.size(16.dp))
                         Text(if (s.year > 0) "${s.year}" else "Album", color = Color.White, style = T.small.copy(fontWeight = FontWeight.SemiBold))
@@ -261,7 +346,8 @@ fun NowPlayingPane(
                 if (liked) Ic.HeartFilled else Ic.Heart,
                 if (liked) "Remove from favourites" else "Add to favourites",
                 { vm.toggleFavorite(s.id) },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 22.dp),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 22.dp)
+                    .border(2.dp, c.bg, androidx.compose.foundation.shape.CircleShape),
                 size = 76.dp, container = c.accent, content = c.onAccent, iconSize = 28.dp,
             )
         }
@@ -296,6 +382,9 @@ fun NowPlayingPane(
                     )
                 }
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val sourceKind = if (s.volume == com.skarif.kairos.data.db.ONLINE_VOLUME) "Online" else "Offline"
+                    val mediaKind = if (now.videoActive) "Video" else "Audio"
+                    InfoChip(Ic.Wave, "$mediaKind · $sourceKind")
                     InfoChip(Ic.Wave, now.output?.let { "${s.formatLabel()} $it" } ?: s.formatLabel())
                     InfoChip(Ic.Clock, formatTime(s.durationMs))
                     if (now.shownSize > 0) InfoChip(Ic.Queue, "${now.shownPosition + 1} of ${now.shownSize}", onQueue)
@@ -332,23 +421,24 @@ fun NowPlayingPane(
                     }
                     CircleButton(Ic.Next, "Next song", vm::next, size = 64.dp, iconSize = 22.dp)
                 }
-                Row(Modifier.padding(bottom = 24.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    CircleButton(Ic.Shuffle, if (now.shuffle) "Shuffle, on" else "Shuffle, off", vm::toggleShuffle, size = 48.dp,
-                        container = if (now.shuffle) c.ink else c.card, content = if (now.shuffle) c.inkFg else c.text)
-                    CircleButton(
-                        Ic.Wave, if (settings.smartShuffle) "Smart shuffle, on" else "Smart shuffle, off",
-                        { vm.updateSettings { it.copy(smartShuffle = !it.smartShuffle) } }, size = 48.dp,
-                        container = if (settings.smartShuffle) c.ink else c.card, content = if (settings.smartShuffle) c.inkFg else c.text,
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 24.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    PlayerActionTile(Ic.Shuffle, "Shuffle", active = now.shuffle, onClick = vm::toggleShuffle)
+                    PlayerActionTile(
+                        Ic.Wave, "Smart", active = settings.smartShuffle,
+                        onClick = { vm.updateSettings { it.copy(smartShuffle = !it.smartShuffle) } },
                     )
-                    CircleButton(
+                    PlayerActionTile(
                         if (now.repeatMode == androidx.media3.common.Player.REPEAT_MODE_ONE) Ic.RepeatOne else Ic.Repeat,
-                        "Repeat", vm::cycleRepeat, size = 48.dp,
-                        container = if (now.repeatMode != androidx.media3.common.Player.REPEAT_MODE_OFF) c.ink else c.card,
-                        content = if (now.repeatMode != androidx.media3.common.Player.REPEAT_MODE_OFF) c.inkFg else c.text,
+                        if (now.repeatMode == androidx.media3.common.Player.REPEAT_MODE_ONE) "Repeat 1" else "Repeat",
+                        active = now.repeatMode != androidx.media3.common.Player.REPEAT_MODE_OFF,
+                        onClick = vm::cycleRepeat,
                     )
-                    CircleButton(Ic.Queue, "Queue", onQueue, size = 48.dp)
-                    CircleButton(Ic.Radio, "Start song radio", { vm.startRadio(s) }, size = 48.dp)
-                    CircleButton(Ic.Share, "Share", { shareSong(ctx, s) }, size = 48.dp)
+                    PlayerActionTile(Ic.Queue, "Queue", active = false, onClick = onQueue)
+                    PlayerActionTile(Ic.Radio, "Radio", active = false, onClick = { vm.startRadio(s) })
+                    PlayerActionTile(Ic.Share, "Share", active = false, onClick = { shareSong(ctx, s) })
                 }
             }
             // The cards below the fold are composed after the player has finished opening, so the
@@ -370,6 +460,36 @@ fun NowPlayingPane(
 }
 
 @Composable
+private fun PlayerActionTile(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    active: Boolean,
+    onClick: () -> Unit,
+) {
+    val c = P.colors
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        CircleButton(
+            icon = icon,
+            contentDescription = label,
+            onClick = onClick,
+            size = 46.dp,
+            container = if (active) c.ink else c.card,
+            content = if (active) c.inkFg else c.text,
+            iconSize = 19.dp,
+        )
+        Text(
+            label,
+            style = T.small.copy(fontSize = 10.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.SemiBold),
+            color = c.text.copy(alpha = if (active) 1f else 0.80f),
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
 private fun InfoChip(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String, onClick: (() -> Unit)? = null) {
     val c = P.colors
     val press = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
@@ -384,5 +504,55 @@ private fun InfoChip(icon: androidx.compose.ui.graphics.vector.ImageVector, text
     ) {
         Icon(icon, null, tint = c.text, modifier = Modifier.size(16.dp))
         Text(text, style = T.small.copy(fontWeight = FontWeight.SemiBold), color = c.text, maxLines = 1)
+    }
+}
+
+
+/**
+ * Song | Video, at the top of the cover. Video is greyed out (with a spinner while the video is
+ * being looked for) when the song has none, so the switch never jumps in and out.
+ */
+@Composable
+private fun ModeToggle(state: VideoState, video: Boolean, onSelect: (Boolean) -> Unit, onUnavailable: (VideoState) -> Unit) {
+    val videoReady = state is VideoState.Available
+    val canExplain = state is VideoState.Unavailable || state is VideoState.Error
+    Row(
+        Modifier.clip(androidx.compose.foundation.shape.CircleShape)
+            .background(Color(0x59000000))
+            .border(1.dp, Color.White.copy(alpha = 0.14f), androidx.compose.foundation.shape.CircleShape)
+            .padding(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ModeSegment("Audio", selected = !video, enabled = true, dimmed = false, busy = false) { onSelect(false) }
+        ModeSegment(
+            "Video",
+            selected = video,
+            enabled = videoReady || canExplain,
+            dimmed = !videoReady,
+            busy = state is VideoState.Checking,
+        ) {
+            if (videoReady) onSelect(true) else if (canExplain) onUnavailable(state)
+        }
+    }
+}
+
+@Composable
+private fun ModeSegment(label: String, selected: Boolean, enabled: Boolean, dimmed: Boolean, busy: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .background(if (selected) Color.White else Color.Transparent)
+            .selectable(selected = selected, enabled = enabled, role = Role.Tab, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            label, style = T.small.copy(fontWeight = FontWeight.SemiBold),
+            color = if (selected) Color.Black else Color.White.copy(alpha = if (!dimmed) 1f else 0.50f),
+        )
+        if (busy) androidx.compose.material3.CircularProgressIndicator(
+            modifier = Modifier.size(11.dp), strokeWidth = 1.5.dp, color = Color.White.copy(alpha = 0.8f),
+        )
     }
 }

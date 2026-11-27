@@ -9,6 +9,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -64,8 +65,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.skarif.kairos.data.SongSort
 import com.skarif.kairos.ui.motion.Motion
-import com.skarif.kairos.ui.components.headerPanel
+import com.skarif.kairos.ui.components.TabHeader
 import com.skarif.kairos.ui.components.stretchTitle
+import com.skarif.kairos.ui.theme.mixedHeadline
 import com.skarif.kairos.data.matchesQuery
 import com.skarif.kairos.data.db.SongEntity
 import com.skarif.kairos.ui.MainViewModel
@@ -205,35 +207,45 @@ fun LibraryScreen(
             verticalArrangement = Arrangement.spacedBy(if (tab == LibTab.ALBUMS || tab == LibTab.GENRES) 10.dp else 0.dp),
         ) {
             item(span = { GridItemSpan(2) }, key = "header") {
-                Column(
-                    Modifier.headerPanel { band.pull },
-                    verticalArrangement = Arrangement.spacedBy(18.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircleButton(Ic.Folder, "Music folders", onFolders, container = chip, content = fg)
-                        Text("Library", Modifier.weight(1f), color = fg, style = T.title, textAlign = TextAlign.Center)
-                        CircleButton(Ic.Settings, "Settings", onSettings, container = chip, content = fg)
-                    }
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Your collection", color = soft, style = T.body)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("${fmt.format(count)} $noun", Modifier.weight(1f).stretchTitle { band.pull }, color = fg, style = T.big)
-                            CircleButton(Ic.Refresh, "Scan again", vm::scanNow, size = 44.dp, container = Color.Transparent, content = fg)
+                TabHeader(
+                    "Library",
+                    left = { chipCol -> CircleButton(Ic.Folder, "Music folders", onFolders, container = chipCol, content = fg) },
+                    right = { chipCol ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CircleButton(Ic.Refresh, "Scan again", vm::scanNow, container = chipCol, content = fg)
+                            CircleButton(Ic.Settings, "Settings", onSettings, container = chipCol, content = fg)
                         }
+                    },
+                    pull = { band.pull },
+                ) { chipCol ->
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
-                            if (scan == ScanState.Scanning) "Scanning your music folders…" else summary,
-                            color = soft, style = T.small,
+                            mixedHeadline("Your " to false, "library" to true),
+                            Modifier.stretchTitle { band.pull },
+                            style = T.h1.copy(fontSize = 36.sp, lineHeight = 40.sp),
+                            color = fg,
+                        )
+                        Text(
+                            if (scan == ScanState.Scanning) "Scanning your music folders…"
+                            else "${fmt.format(count)} $noun · $summary",
+                            color = soft,
+                            style = T.small.copy(fontFeatureSettings = "tnum"),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    SearchField(filter, { filter = it }, "Filter ${tab.label.lowercase()}", container = chip, height = 52.dp)
+                    SearchField(filter, { filter = it }, "Filter ${tab.label.lowercase()}", container = chipCol, height = 48.dp)
                     Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)).background(chip).padding(4.dp),
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+                            .background(chipCol)
+                            .border(1.dp, c.line.copy(alpha = if (c.dark) 0.30f else 0.20f), RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+                            .padding(4.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         LibTab.entries.forEach { t ->
                             val on = t == tab
                             Box(
-                                Modifier.weight(1f).height(42.dp).clip(RoundedCornerShape(21.dp))
+                                Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(20.dp))
                                     .background(if (on) c.ink else Color.Transparent)
                                     .selectable(on, role = Role.Tab) {
                                         tab = t
@@ -279,15 +291,21 @@ fun LibraryScreen(
             }
             // Mood by colour: shuffle songs whose cover is mostly this colour.
             if (tab == LibTab.SONGS) item(span = { GridItemSpan(2) }, key = "colours") {
+                val hairline = c.line.copy(alpha = if (c.dark) 0.45f else 0.30f)
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp),
+                    Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 8.dp)
+                        .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+                        .background(c.card.copy(alpha = if (c.dark) 0.80f else 0.90f))
+                        .border(1.dp, hairline, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("Play by colour", Modifier.weight(1f), style = T.small, color = c.muted)
+                    Text("PLAY BY COLOUR", Modifier.weight(1f), style = T.kicker, color = c.muted)
                     com.skarif.kairos.data.CoverColour.entries.forEach { col ->
                         Box(
-                            Modifier.size(26.dp).clip(CircleShape).background(Color(col.swatch))
+                            Modifier.size(24.dp).clip(CircleShape).background(Color(col.swatch))
+                                .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
                                 .clickable(role = Role.Button, onClickLabel = "Shuffle ${col.label.lowercase()} covers") {
                                     // The player stays closed: it may take a moment, or there may be too few.
                                     vm.playByColour(col)
@@ -400,17 +418,20 @@ fun LibraryScreen(
             enter = slideInVertically(tween(260)) { -it } + fadeIn(),
             exit = slideOutVertically(tween(200)) { -it } + fadeOut(),
         ) {
-            Row(
-                Modifier.fillMaxWidth().background(panel).statusBarsPadding().padding(horizontal = 18.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Library", style = T.title, color = fg)
-                    Text("${fmt.format(count)} $noun", style = T.small, color = soft)
+            Column(Modifier.fillMaxWidth().background(panel).statusBarsPadding()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Library", style = T.title, color = fg)
+                        Text("${fmt.format(count)} $noun", style = T.small.copy(fontFeatureSettings = "tnum"), color = soft)
+                    }
+                    if (tab == LibTab.SONGS) CircleButton(Ic.Sort, "Sort songs", onSort, size = 42.dp, container = chip, content = fg)
+                    CircleButton(Ic.Up, "Back to top", { scope.launch { grid.animateScrollToItem(0) } }, size = 42.dp, container = c.ink, content = c.inkFg)
                 }
-                if (tab == LibTab.SONGS) CircleButton(Ic.Sort, "Sort songs", onSort, size = 44.dp, container = chip, content = fg)
-                CircleButton(Ic.Up, "Back to top", { scope.launch { grid.animateScrollToItem(0) } }, size = 44.dp, container = c.ink, content = c.inkFg)
+                Box(Modifier.fillMaxWidth().height(0.8.dp).background(c.line.copy(alpha = 0.25f)))
             }
         }
 
@@ -496,6 +517,7 @@ private fun YoursTiles(vm: MainViewModel, onOpenCollection: (String) -> Unit, on
         Triple(Ic.DownArrow, "Downloads", "${downloads.size} songs") to onDownloads,
         Triple(Ic.Clock, "Recently played", "$recent songs") to { onOpenCollection("lastplayed") },
     )
+    val hairline = c.line.copy(alpha = if (c.dark) 0.45f else 0.30f)
     Column(Modifier.padding(start = 18.dp, end = 18.dp, top = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         tiles.chunked(2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -503,16 +525,19 @@ private fun YoursTiles(vm: MainViewModel, onOpenCollection: (String) -> Unit, on
                     val (icon, label, count) = t
                     Row(
                         Modifier.weight(1f).cardClick("Open $label", onClick = go)
-                            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)).background(c.card).padding(14.dp),
+                            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+                            .background(c.card.copy(alpha = if (c.dark) 0.85f else 0.92f))
+                            .border(1.dp, hairline, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+                            .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Box(Modifier.size(40.dp).clip(CircleShape).background(c.accent), contentAlignment = Alignment.Center) {
-                            androidx.compose.material3.Icon(icon, null, tint = c.onAccent, modifier = Modifier.size(20.dp))
+                        Box(Modifier.size(38.dp).clip(CircleShape).background(c.accent.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
+                            androidx.compose.material3.Icon(icon, null, tint = c.accent, modifier = Modifier.size(19.dp))
                         }
                         Column {
-                            Text(label, style = T.title.copy(fontSize = 15.sp), color = c.text, maxLines = 1)
-                            Text(count, style = T.small, color = c.muted, maxLines = 1)
+                            Text(label, style = T.title.copy(fontSize = 14.sp), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(count, style = T.small.copy(fontFeatureSettings = "tnum"), color = c.muted, maxLines = 1)
                         }
                     }
                 }

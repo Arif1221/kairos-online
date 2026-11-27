@@ -74,8 +74,32 @@ class PlaybackService : MediaSessionService() {
             .setHandleAudioBecomingNoisy(true) // pause when headphones are unplugged
             // Online flavor: a data source that also understands streamed songs' Uris.
             .apply {
-                com.skarif.kairos.online.Flavor.online?.let {
-                    setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(it.dataSourceFactory(this@PlaybackService, ::streamQuality)))
+                com.skarif.kairos.online.Flavor.online?.let { online ->
+                    val data = online.dataSourceFactory(this@PlaybackService, ::streamQuality)
+                    val default = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(data)
+                    // Video mode: the picture-only stream merged with the song's own audio.
+                    setMediaSourceFactory(object : androidx.media3.exoplayer.source.MediaSource.Factory by default {
+                        override fun createMediaSource(mediaItem: MediaItem): androidx.media3.exoplayer.source.MediaSource {
+                            val uri = mediaItem.localConfiguration?.uri
+                            if (uri?.scheme != VIDEO_SCHEME) return default.createMediaSource(mediaItem)
+                            val videoId = uri.schemeSpecificPart.orEmpty()
+                            if (videoId.isBlank()) {
+                                android.util.Log.w("KairosVideo", "Empty video id in $uri; falling back to default source")
+                                return default.createMediaSource(mediaItem)
+                            }
+                            return try {
+                                val progressive = androidx.media3.exoplayer.source.ProgressiveMediaSource.Factory(data)
+                                androidx.media3.exoplayer.source.MergingMediaSource(
+                                    // Pass the original mediaItem so MergingMediaSource preserves mediaId and mediaMetadata in the Timeline.
+                                    progressive.createMediaSource(mediaItem),
+                                    progressive.createMediaSource(MediaItem.fromUri(online.audioUri(videoId))),
+                                )
+                            } catch (e: Exception) {
+                                android.util.Log.w("KairosVideo", "Failed to build MergingMediaSource for $videoId; falling back to audio", e)
+                                default.createMediaSource(mediaItem.buildUpon().setUri(online.audioUri(videoId)).build())
+                            }
+                        }
+                    })
                 }
             }
             // Streams need the network to stay up while the screen is off.
@@ -168,6 +192,9 @@ class PlaybackService : MediaSessionService() {
     /** Online songs skipped in a row because they failed to load; stops a dead network racing through the queue. */
     private var onlineSkips = 0
 
+    /** The song that already got its one fresh-address retry after an error. */
+    private var retriedItem: String? = null
+
     private var widgetJob: kotlinx.coroutines.Job? = null
 
     /** Keeps the home-screen widget in step: song, cover and play/pause. Nothing to do without a widget. */
@@ -192,10 +219,27 @@ class PlaybackService : MediaSessionService() {
 
     private val playerListener = object : Player.Listener {
         // An online song that fails to load (removed video, YouTube change, no network) is skipped
-        // rather than stopping playback, up to 3 in a row.
+        // rather than stopping playback, up to 3 in a row. First it gets one more try with a fresh
+        // stream address: addresses stop working when the phone changes network (Wi-Fi to mobile
+        // data) and were kept for hours, so the same dead one was used again and the song was skipped.
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
             val p = session?.player ?: return
-            val online = (p.currentMediaItem?.mediaId?.toLongOrNull() ?: 0L) < 0
+            val item = p.currentMediaItem
+            val online = (item?.mediaId?.toLongOrNull() ?: 0L) < 0
+            if (online) item?.localConfiguration?.uri?.let { com.skarif.kairos.online.Flavor.online?.forgetStream(it) }
+            // A video that fails is the screen's to handle: it goes back to the song's sound, not on to the next song.
+            if (item?.requestMetadata?.mediaUri?.scheme == VIDEO_SCHEME) return
+            val permanent = generateSequence<Throwable>(error) { it.cause }.any { t ->
+                val m = t.message.orEmpty()
+                "Age-restricted" in m || "Not available in your region" in m || "video is private" in m ||
+                    "Paid content" in m || "Unavailable on YouTube" in m || "No playable audio" in m
+            }
+            if (online && !permanent && retriedItem != item?.mediaId) {
+                retriedItem = item?.mediaId
+                p.prepare()
+                if (p.playWhenReady) p.play()
+                return
+            }
             if (online && onlineSkips < 3 && p.hasNextMediaItem()) {
                 onlineSkips++
                 p.seekToNextMediaItem()
@@ -205,6 +249,11 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            // The screen swapped this song's stream (sound <-> video): same song, same listen. Without
+            // this it was counted as a new play each time, splitting one listen into several.
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED &&
+                mediaItem != null && mediaItem.mediaId == currentSongId.toString()
+            ) return
             updateWidget()
             recordListening()
             currentSongId = mediaItem?.mediaId?.toLongOrNull()
@@ -219,6 +268,7 @@ class PlaybackService : MediaSessionService() {
             val now = System.currentTimeMillis()
             if (isPlaying) {
                 onlineSkips = 0 // something is playing again
+                retriedItem = null
                 playingSince = now
                 tickJob?.cancel()
                 tickJob = scope.launch { while (true) { kotlinx.coroutines.delay(15_000); saveListening() } }
@@ -247,6 +297,39 @@ class PlaybackService : MediaSessionService() {
             if (container.settings.settings.value.outputMode == OutputMode.BIT_PERFECT && format.sampleRate > 0) {
                 bitPerfectLabel = BitPerfect.apply(this@PlaybackService, format.sampleRate)
             }
+        }
+
+        // --- video diagnostics (tag KairosVideo): which stage of video mode fails shows up here ---
+        override fun onTracksChanged(eventTime: AnalyticsListener.EventTime, tracks: androidx.media3.common.Tracks) {
+            val v = tracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
+            val a = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+            android.util.Log.i("KairosVideo", "tracks: video=${v.size} " + v.joinToString { g -> (0 until g.length).joinToString("/") { i -> "${g.getTrackFormat(i).sampleMimeType} ${g.getTrackFormat(i).width}x${g.getTrackFormat(i).height} supported=${g.isTrackSupported(i)} selected=${g.isTrackSelected(i)}" } } + " | audio=${a.size}")
+        }
+        override fun onVideoDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
+            android.util.Log.i("KairosVideo", "video decoder: $decoderName")
+        }
+        override fun onVideoInputFormatChanged(eventTime: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: DecoderReuseEvaluation?) {
+            android.util.Log.i("KairosVideo", "video format: ${format.sampleMimeType} ${format.width}x${format.height} ${format.codecs}")
+        }
+        override fun onVideoCodecError(eventTime: AnalyticsListener.EventTime, videoCodecError: Exception) {
+            android.util.Log.w("KairosVideo", "video codec error", videoCodecError)
+        }
+        override fun onRenderedFirstFrame(eventTime: AnalyticsListener.EventTime, output: Any, renderTimeMs: Long) {
+            android.util.Log.i("KairosVideo", "first frame rendered to $output")
+        }
+        override fun onSurfaceSizeChanged(eventTime: AnalyticsListener.EventTime, width: Int, height: Int) {
+            android.util.Log.i("KairosVideo", "surface size: ${width}x$height")
+        }
+        override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
+            android.util.Log.i("KairosVideo", "dropped $droppedFrames frames in ${elapsedMs}ms")
+        }
+        override fun onLoadError(eventTime: AnalyticsListener.EventTime, loadEventInfo: androidx.media3.exoplayer.source.LoadEventInfo, mediaLoadData: androidx.media3.exoplayer.source.MediaLoadData, error: java.io.IOException, wasCanceled: Boolean) {
+            if (mediaLoadData.trackType == C.TRACK_TYPE_VIDEO || mediaLoadData.trackType == C.TRACK_TYPE_DEFAULT || mediaLoadData.trackType == C.TRACK_TYPE_UNKNOWN)
+                android.util.Log.w("KairosVideo", "load error type=${mediaLoadData.trackType} canceled=$wasCanceled uri=${loadEventInfo.uri}", error)
+        }
+        override fun onPlaybackStateChanged(eventTime: AnalyticsListener.EventTime, state: Int) {
+            if (session?.player?.currentMediaItem?.requestMetadata?.mediaUri?.scheme == VIDEO_SCHEME)
+                android.util.Log.i("KairosVideo", "state=$state")
         }
 
         override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, audioTrackConfig: AudioSink.AudioTrackConfig) {

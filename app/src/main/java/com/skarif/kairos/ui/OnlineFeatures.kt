@@ -6,6 +6,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import com.skarif.kairos.AppContainer
 import com.skarif.kairos.data.PhoneSaver
+import com.skarif.kairos.data.DownloadMode
 import com.skarif.kairos.data.db.ONLINE_VOLUME
 import com.skarif.kairos.data.db.SongEntity
 import com.skarif.kairos.data.db.isOnline
@@ -147,8 +148,38 @@ class OnlineFeatures(
     }.distinctUntilChanged()
 
     private fun offlineMessage() = "You're offline. ${source?.name ?: "Streaming"} needs a connection."
-    private fun failMessage(e: Exception) =
-        if (!networkUp.value) offlineMessage() else "Couldn't reach ${source?.name}. Try again in a moment."
+
+    /** Turns network and extractor exceptions into clear, actionable user-facing messages. */
+    fun describeError(e: Throwable): String {
+        if (!networkUp.value) return offlineMessage()
+        for (t in generateSequence(e) { it.cause }) {
+            val name = t.javaClass.simpleName
+            val msg = t.message.orEmpty()
+            when {
+                t is java.net.UnknownHostException || t is java.net.ConnectException ->
+                    return "No internet connection. Check your network and try again."
+                t is java.net.SocketTimeoutException ->
+                    return "Connection timed out. Try again in a moment."
+                name == "ReCaptchaException" || "429" in msg ->
+                    return "Too many requests right now. Wait a moment and try again."
+                name == "AgeRestrictedContentException" ->
+                    return "This is age-restricted on ${source?.name ?: "YouTube"}."
+                name == "GeographicRestrictionException" ->
+                    return "This isn't available in your region."
+                name == "PrivateContentException" ->
+                    return "This video is private."
+                name == "PaidContentException" ->
+                    return "Paid content cannot be streamed."
+                name == "ContentNotAvailableException" ->
+                    return "This isn't available on ${source?.name ?: "YouTube"} anymore."
+                msg.startsWith("Nothing found for ") ->
+                    return msg
+            }
+        }
+        return "Couldn't reach ${source?.name}. Try again in a moment."
+    }
+
+    private fun failMessage(e: Exception) = describeError(e)
 
     private fun seenItems(items: List<OnlineItem>) = seen(items.filterIsInstance<OnlineItem.Track>().map { it.song })
 
@@ -194,6 +225,9 @@ class OnlineFeatures(
 
     /** Video ids of finished downloads. */
     private val _downloaded = MutableStateFlow<Set<String>>(emptySet())
+    private val _downloadedVideo = MutableStateFlow<Set<String>>(emptySet())
+    val downloadedVideoIds: StateFlow<Set<Long>> = _downloadedVideo.map { ids -> ids.mapTo(HashSet(), ::onlineId) }
+        .stateIn(scope, SharingStarted.Eagerly, emptySet())
     val downloadedIds: StateFlow<Set<Long>> = _downloaded.map { ids -> ids.mapTo(HashSet(), ::onlineId) }
         .stateIn(scope, SharingStarted.Eagerly, emptySet())
 
@@ -220,7 +254,7 @@ class OnlineFeatures(
     private val _askStorage = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val askStorage: kotlinx.coroutines.flow.SharedFlow<Unit> = _askStorage
 
-    private class Task(val song: SongEntity, val toPhone: Boolean)
+    private class Task(val song: SongEntity, val mode: DownloadMode)
     private val queue = Channel<Task>(Channel.UNLIMITED)
     private val jobs = java.util.concurrent.ConcurrentHashMap<Long, Job>()
 
@@ -228,25 +262,40 @@ class OnlineFeatures(
         val s = source ?: return
         scope.launch(Dispatchers.IO) {
             _downloaded.value = s.downloadedIds(app)
+            _downloadedVideo.value = s.downloadedVideoIds(app)
             _downloadBytes.value = s.downloadBytes(app)
         }
     }
 
-    /**
-     * The Download button: keeps [songs] in the app, or saves them to the phone as files when
-     * Settings says so. Queued one at a time; songs already done or queued are skipped.
-     */
-    fun download(songs: List<SongEntity>) = enqueue(songs, ct.settings.settings.value.downloadToPhone)
+    /** Uses the remembered choice for bulk actions; otherwise bulk Download defaults to audio-only. */
+    fun download(songs: List<SongEntity>) {
+        val settings = ct.settings.settings.value
+        val mode = if (settings.rememberDownloadChoice) settings.downloadMode else DownloadMode.AUDIO_ONLY
+        enqueue(songs, mode)
+    }
 
-    /** Saves [songs] as M4A files in Music/Kairos, whatever the Download setting is. */
-    fun saveToPhone(songs: List<SongEntity>) = enqueue(songs, toPhone = true)
+    fun download(songs: List<SongEntity>, mode: DownloadMode) = enqueue(songs, mode)
 
-    private fun enqueue(songs: List<SongEntity>, toPhone: Boolean) {
+    /** Saves [songs] as M4A files in Music/Kairos, whatever the remembered Download choice is. */
+    fun saveToPhone(songs: List<SongEntity>) = enqueue(songs, DownloadMode.SAVE_TO_PHONE)
+
+    private fun enqueue(songs: List<SongEntity>, mode: DownloadMode) {
         if (source == null) return
-        val done = if (toPhone) _savedToPhone.value else _downloaded.value
-        val todo = songs.filter { it.isOnline && it.fileName !in done && it.id !in _downloading.value }.distinctBy { it.id }
+        val toPhone = mode == DownloadMode.SAVE_TO_PHONE
+        val todo = songs.filter { song ->
+            if (!song.isOnline || song.id in _downloading.value) return@filter false
+            when (mode) {
+                DownloadMode.SAVE_TO_PHONE -> song.fileName !in _savedToPhone.value
+                DownloadMode.AUDIO_ONLY -> song.fileName !in _downloaded.value
+                DownloadMode.AUDIO_VIDEO -> song.fileName !in _downloaded.value || song.fileName !in _downloadedVideo.value
+            }
+        }.distinctBy { it.id }
         if (todo.isEmpty()) {
-            if (songs.isNotEmpty()) notify(if (toPhone) "Already saved to Music/${PhoneSaver.FOLDER}" else "Already downloaded")
+            if (songs.isNotEmpty()) notify(when (mode) {
+                DownloadMode.SAVE_TO_PHONE -> "Already saved to Music/${PhoneSaver.FOLDER}"
+                DownloadMode.AUDIO_ONLY -> "Already downloaded"
+                DownloadMode.AUDIO_VIDEO -> "Audio and video already downloaded"
+            })
             return
         }
         if (!networkUp.value) { notify("Downloading needs a connection"); return }
@@ -261,7 +310,7 @@ class OnlineFeatures(
         scope.launch {
             // Downloads need their rows, so they show up offline under Downloads.
             if (!toPhone) ct.db.songs().upsertAll(todo)
-            todo.forEach { queue.send(Task(it, toPhone)) }
+            todo.forEach { queue.send(Task(it, mode)) }
         }
         val what = if (toPhone) "Saving" else "Downloading"
         notify(if (todo.size == 1) "$what ${todo[0].title}" else "$what ${todo.size} songs")
@@ -271,7 +320,11 @@ class OnlineFeatures(
     fun cancelDownload(song: SongEntity) {
         _downloading.update { it - song.id }
         jobs.remove(song.id)?.cancel()
-        scope.launch(Dispatchers.IO) { source?.removeDownload(app, song.fileName); refreshDownloads() }
+        scope.launch(Dispatchers.IO) {
+            if (song.fileName in _downloaded.value) source?.removeVideoDownload(app, song.fileName)
+            else source?.removeDownload(app, song.fileName)
+            refreshDownloads()
+        }
     }
 
     fun removeDownload(song: SongEntity) {
@@ -300,6 +353,7 @@ class OnlineFeatures(
             val song = task.song
             if (song.id !in _downloading.value) continue // cancelled while waiting
             var failed: Exception? = null
+            var partialFailure: Exception? = null
             val job = scope.launch {
                 var shown = 0f
                 // Every 2%: enough to look alive, few enough not to redraw lists constantly.
@@ -310,17 +364,26 @@ class OnlineFeatures(
                     }
                 }
                 try {
-                    if (task.toPhone) {
-                        val tmp = File(app.cacheDir, "save/${song.fileName}.m4a").apply { parentFile?.mkdirs() }
-                        try {
-                            s.fetchM4a(song, tmp) { p -> report(p * 0.95f) }
-                            PhoneSaver.save(app, song, tmp, ct.artwork.load(song, 720))
-                            markSavedToPhone(song.fileName)
-                        } finally {
-                            tmp.delete()
+                    when (task.mode) {
+                        DownloadMode.SAVE_TO_PHONE -> {
+                            val tmp = File(app.cacheDir, "save/${song.fileName}.m4a").apply { parentFile?.mkdirs() }
+                            try {
+                                s.fetchM4a(song, tmp) { p -> report(p * 0.95f) }
+                                PhoneSaver.save(app, song, tmp, ct.artwork.load(song, 720))
+                                markSavedToPhone(song.fileName)
+                            } finally { tmp.delete() }
                         }
-                    } else {
-                        s.download(app, song, ct.settings.settings.value.streamQuality, report)
+                        DownloadMode.AUDIO_ONLY, DownloadMode.AUDIO_VIDEO -> {
+                            if (!s.isDownloaded(app, song)) s.download(app, song, ct.settings.settings.value.streamQuality) { p ->
+                                report(if (task.mode == DownloadMode.AUDIO_VIDEO) p * 0.45f else p)
+                            }
+                            if (task.mode == DownloadMode.AUDIO_VIDEO && song.fileName !in _downloadedVideo.value) {
+                                try {
+                                    s.downloadVideo(app, song, ct.settings.settings.value.streamQuality) { p -> report(0.45f + p * 0.55f) }
+                                } catch (e: CancellationException) { throw e }
+                                catch (e: Exception) { partialFailure = e }
+                            }
+                        }
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -337,11 +400,18 @@ class OnlineFeatures(
             cacheChanged.value++
             when {
                 wasCancelled -> {}
-                failed != null -> notify(if (networkUp.value) "Couldn't download ${song.title}" else "Download paused: you're offline")
-                task.toPhone && _downloading.value.isEmpty() -> notify("Saved to Music/${PhoneSaver.FOLDER}")
-                _downloading.value.isEmpty() -> notify("Downloaded ${song.title}")
+                failed != null -> notify(
+                    if (!networkUp.value) "Download paused: you're offline"
+                    else "Couldn't download ${song.title}: ${describeError(failed).removeSuffix(".")}",
+                )
+                task.mode == DownloadMode.SAVE_TO_PHONE && _downloading.value.isEmpty() -> notify("Saved to Music/${PhoneSaver.FOLDER}")
+                partialFailure != null && _downloading.value.isEmpty() -> notify(
+                    if (partialFailure?.message?.startsWith("No matching video") == true) "Audio downloaded; no matching video for ${song.title}"
+                    else "Audio downloaded; video download failed for ${song.title}"
+                )
+                _downloading.value.isEmpty() -> notify(if (task.mode == DownloadMode.AUDIO_VIDEO) "Downloaded audio and video for ${song.title}" else "Downloaded ${song.title}")
             }
-            if (task.toPhone && failed == null && !wasCancelled && _downloading.value.isEmpty()) onSavedToPhone()
+            if (task.mode == DownloadMode.SAVE_TO_PHONE && failed == null && !wasCancelled && _downloading.value.isEmpty()) onSavedToPhone()
         }
     }
 

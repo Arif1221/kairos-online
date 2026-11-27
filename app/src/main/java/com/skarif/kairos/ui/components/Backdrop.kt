@@ -74,13 +74,12 @@ val LocalBackdrop = staticCompositionLocalOf { BackdropState() }
 fun rememberBackdrop(art: Bitmap?, enabled: Boolean, playing: Boolean = false): BackdropState {
     val state = remember { BackdropState() }
     state.enabled = enabled
-    // The living background. ~30 updates a second is plenty for motion this slow, and the frame
-    // clock stops when the app isn't visible, so this costs nothing in the background.
+    // The living background: runs at frame rate while music plays, and the frame clock stops when
+    // the app isn't visible, so this costs nothing in the background.
     LaunchedEffect(playing, enabled, art) {
         if (!playing || !enabled || art == null) return@LaunchedEffect
         var last = withFrameNanos { it }
         while (true) {
-            kotlinx.coroutines.delay(33)
             val now = withFrameNanos { it }
             state.phase += (now - last) / 1e9f
             last = now
@@ -120,11 +119,11 @@ fun Modifier.backdrop(alpha: () -> Float = { 1f }): Modifier {
         // Light dots on dark, grey on light: the old grey dots read as noise on a dark page.
         val tile = dotTile(step, 1.1.dp.toPx(), c.dots)
         val dots = ShaderBrush(ImageShader(tile, TileMode.Repeated, TileMode.Repeated))
-        // Dark themes: a little more colour from the cover, which the dark wash otherwise greys out.
-        val vivid = if (c.dark) androidx.compose.ui.graphics.ColorFilter.colorMatrix(
-            androidx.compose.ui.graphics.ColorMatrix().apply { setToSaturation(1.35f) },
-        ) else null
-        // Pure black is the theme with the darkest wash; it gets a little less of it than before.
+        // Boost saturation so the morphing cover colours stay vivid under the theme wash.
+        val vivid = androidx.compose.ui.graphics.ColorFilter.colorMatrix(
+            androidx.compose.ui.graphics.ColorMatrix().apply { setToSaturation(if (c.dark) 1.55f else 1.25f) },
+        )
+        // Pure black is the theme with the darkest wash; keep enough contrast while letting colour waves show.
         val pure = c.bg == Color.Black
         onDrawBehind {
             val a = alpha().coerceIn(0f, 1f)
@@ -136,47 +135,55 @@ fun Modifier.backdrop(alpha: () -> Float = { 1f }): Modifier {
                 val t = state.phase
                 state.previous?.let { drawCover(it, a * (1f - f), t, vivid) }
                 cur?.let { drawCover(it, a * f, t, vivid) }
-                // The theme's wash, at about two thirds strength: full strength (62% white in the
-                // light theme) all but hid pale covers.
-                // Dark themes keep more of the wash: weak, it let bright covers fight with the text.
-                // Dark: a lighter wash in the middle of the page, where the cover shows between cards,
-                // and fuller at the top and bottom, where the header and the dock sit.
                 if (c.dark) {
-                    val mid = if (pure) 0.78f else 0.62f
+                    val mid = if (pure) 0.52f else 0.42f
                     drawRect(
                         androidx.compose.ui.graphics.Brush.verticalGradient(
-                            0f to c.veil.copy(alpha = c.veil.alpha * 0.95f),
+                            0f to c.veil.copy(alpha = c.veil.alpha * 0.88f),
                             0.45f to c.veil.copy(alpha = c.veil.alpha * mid),
-                            1f to c.veil.copy(alpha = c.veil.alpha * 0.92f),
+                            1f to c.veil.copy(alpha = c.veil.alpha * 0.86f),
                         ),
                         alpha = a,
                     )
-                } else drawRect(c.veil, alpha = a * 0.68f)
+                } else drawRect(c.veil, alpha = a * 0.72f)
             }
             drawRect(dots, alpha = a)
         }
     }
 }
 
-/** The tiny cover stretched to fill, cropped to keep its square shape (like ContentScale.Crop, zoomed 1.2×). */
+/**
+ * Dual-layer counter-drifting cover: a base layer plus a mirrored/counter-rotating second layer
+ * on an opposing Lissajous path so colour pockets visibly morph and flow into each other.
+ */
 private fun DrawScope.drawCover(img: ImageBitmap, alpha: Float, t: Float = 0f, filter: androidx.compose.ui.graphics.ColorFilter? = null) {
     if (alpha <= 0f) return
-    // Living motion, big enough to see through the blur and the wash: a slow wander (two
-    // unrelated periods, so it never visibly loops), a turn of a few degrees, and a breath in size.
-    // 1.45x zoom keeps the edges off screen at every angle and offset.
     val tau = 2f * PI.toFloat()
-    val breath = 1f + 0.07f * sin(t * tau / 8f)
-    val side = maxOf(size.width, size.height) * 1.45f * breath
-    val dx = size.width * 0.12f * sin(t * tau / 13f)
-    val dy = size.height * 0.06f * sin(t * tau / 11f + 1.3f)
-    val angle = 7f * sin(t * tau / 19f + 0.6f)
-    val dst = IntSize(side.toInt(), side.toInt())
-    val off = IntOffset(((size.width - side) / 2 + dx).toInt(), ((size.height - side) / 2 + dy).toInt())
-    // The square is wider than a portrait page, so clip it to the page. Unclipped, the overflow
-    // painted over the page underneath while this one slid away (the "blur card" on back swipe).
+
+    // Layer 1: primary drift, breath, and rotation.
+    val breath1 = 1f + 0.14f * sin(t * tau / 5.5f)
+    val side1 = maxOf(size.width, size.height) * 2.0f * breath1
+    val dx1 = size.width * 0.24f * sin(t * tau / 7.5f)
+    val dy1 = size.height * 0.16f * sin(t * tau / 6.5f + 1.3f)
+    val angle1 = 22f * sin(t * tau / 11f + 0.6f)
+    val dst1 = IntSize(side1.toInt(), side1.toInt())
+    val off1 = IntOffset(((size.width - side1) / 2 + dx1).toInt(), ((size.height - side1) / 2 + dy1).toInt())
+
+    // Layer 2: counter-drifting mirrored layer so bright/dark regions sweep across layer 1.
+    val breath2 = 1f + 0.16f * sin(t * tau / 4.7f + 2.1f)
+    val side2 = maxOf(size.width, size.height) * 2.1f * breath2
+    val dx2 = -size.width * 0.26f * sin(t * tau / 6.2f + 0.8f)
+    val dy2 = -size.height * 0.18f * sin(t * tau / 5.3f + 2.4f)
+    val angle2 = -28f * sin(t * tau / 9.2f + 1.7f) + 45f
+    val dst2 = IntSize(side2.toInt(), side2.toInt())
+    val off2 = IntOffset(((size.width - side2) / 2 + dx2).toInt(), ((size.height - side2) / 2 + dy2).toInt())
+
     clipRect {
-        rotate(angle, pivot = center + androidx.compose.ui.geometry.Offset(dx, dy)) {
-            drawImage(img, dstOffset = off, dstSize = dst, alpha = alpha, colorFilter = filter, filterQuality = FilterQuality.Low)
+        rotate(angle1, pivot = center + androidx.compose.ui.geometry.Offset(dx1, dy1)) {
+            drawImage(img, dstOffset = off1, dstSize = dst1, alpha = alpha, colorFilter = filter, filterQuality = FilterQuality.Low)
+        }
+        rotate(angle2, pivot = center + androidx.compose.ui.geometry.Offset(dx2, dy2)) {
+            drawImage(img, dstOffset = off2, dstSize = dst2, alpha = alpha * 0.55f, colorFilter = filter, filterQuality = FilterQuality.Low)
         }
     }
 }
@@ -190,15 +197,15 @@ private fun dotTile(step: Int, radius: Float, color: Color): ImageBitmap {
 }
 
 /**
- * 48 px copy of [src], lightly box-blurred three times (close to a Gaussian), then stretched to
- * the screen: the same look as the old live 24 dp blur, with the cover's colours still distinct.
+ * 64 px copy of [src], lightly box-blurred twice so distinct colour pockets remain visible
+ * when animated across the screen.
  */
-internal fun blurredTiny(src: Bitmap, side: Int = 48, radius: Int = 1): ImageBitmap {
+internal fun blurredTiny(src: Bitmap, side: Int = 64, radius: Int = 1): ImageBitmap {
     val small = Bitmap.createScaledBitmap(src, side, side, true)
     val px = IntArray(side * side)
     small.getPixels(px, 0, side, 0, 0, side, side)
     val tmp = IntArray(px.size)
-    repeat(3) {
+    repeat(2) {
         boxPass(px, tmp, side, radius, horizontal = true)
         boxPass(tmp, px, side, radius, horizontal = false)
     }

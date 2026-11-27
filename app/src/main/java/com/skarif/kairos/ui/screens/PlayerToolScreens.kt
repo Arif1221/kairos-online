@@ -7,6 +7,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -204,7 +205,10 @@ fun QueuePane(vm: MainViewModel, onBack: () -> Unit, onSaveAsPlaylist: () -> Uni
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     itemsIndexed(now.queue, key = { _, e -> e.index }, contentType = { _, _ -> "queue" }) { pos, e ->
-                        val song = songMap[e.songId]
+                        // Streamed-only songs are kept in the session lookup before they are
+                        // persisted to Room. Resolve them there as well, so switching the same
+                        // queue item from audio to its video never makes the row look unavailable.
+                        val song = songMap[e.songId] ?: vm.anySong(e.songId)
                         val playing = pos == now.queuePosition
                         val played = pos < now.queuePosition
                         Box(
@@ -257,10 +261,21 @@ fun QueuePane(vm: MainViewModel, onBack: () -> Unit, onSaveAsPlaylist: () -> Uni
                                     SongArt(vm, song, 44.dp, corner = 12.dp)
                                     Column(Modifier.weight(1f)) {
                                         Text(
-                                            song?.title ?: "Not on this phone any more", style = T.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                            song?.title ?: e.title.ifBlank { "Unavailable track" }, style = T.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                             color = c.text.copy(alpha = if (played) 0.5f else 1f),
                                         )
-                                        Text(song?.artist ?: "", style = T.small, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        val artist = song?.artist ?: e.artist
+                                        val tag = when {
+                                            song == null || vm.onlineName == null -> null
+                                            playing && now.videoActive -> "Video · Online"
+                                            song.volume != com.skarif.kairos.data.db.ONLINE_VOLUME -> "Offline"
+                                            song.album == "YouTube" -> "Video · Online"
+                                            else -> "Audio · Online"
+                                        }
+                                        Text(
+                                            if (tag != null) "$artist · $tag" else artist,
+                                            style = T.small, color = if (playing && now.videoActive) c.accent else c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        )
                                     }
                                     Text(formatTime(song?.durationMs ?: 0), style = T.num, color = c.muted)
                                     if (song != null && song.volume == com.skarif.kairos.data.db.ONLINE_VOLUME && vm.onlineName != null) {
@@ -495,71 +510,137 @@ fun SortSheet(vm: MainViewModel, onBack: () -> Unit) {
     }
 }
 
-/** Slide-in menu with every screen. */
+/** Slide-in menu with grouped sections and clear Online/Offline & Audio/Video context. */
 @Composable
 fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> Unit) {
     val c = P.colors
     val cur by vm.currentSong.collectAsStateWithLifecycle()
     val now by vm.now.collectAsStateWithLifecycle()
     val sleep by vm.sleep.collectAsStateWithLifecycle()
-    val items = listOfNotNull(
-        Triple("Home", "home", Ic.Home),
-        vm.onlineName?.let { Triple("Downloads", "downloads", Ic.DownArrow) },
-        vm.onlineName?.let { Triple("Import from Spotify", "online/spotify", Ic.PlaylistAdd) },
-        Triple("Library", "library", Ic.Library), Triple("Playlists", "playlists", Ic.Queue),
-        Triple("Search", "search", Ic.Search), Triple("Statistics", "stats", Ic.Stats), Triple("Queue", "queue", Ic.Queue),
-        Triple("Equalizer", "eq", Ic.Sliders), Triple(if (sleep.active) "Sleep timer (on)" else "Sleep timer", "sleep", Ic.Clock),
-        Triple("Music folders", "folders", Ic.Folder), Triple("Settings", "settings", Ic.Settings),
+    val settings by vm.settings.collectAsStateWithLifecycle()
+
+    data class DrawerItem(val label: String, val route: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val badge: String? = null)
+
+    val browse = listOf(
+        DrawerItem("Home", "home", Ic.Home),
+        DrawerItem("Search", "search", Ic.Search),
+        DrawerItem("Library", "library", Ic.Library),
+        DrawerItem("Playlists", "playlists", Ic.Queue),
     )
+    val sources = listOfNotNull(
+        vm.onlineName?.let { DrawerItem("Downloads", "downloads", Ic.DownArrow, "Offline") },
+        vm.onlineName?.let { DrawerItem("Import from Spotify", "online/spotify", Ic.PlaylistAdd, "Online") },
+        DrawerItem("Music folders", "folders", Ic.Folder, "Device"),
+    )
+    val tools = listOf(
+        DrawerItem("Queue", "queue", Ic.Queue, now.shownSize.takeIf { it > 0 }?.toString()),
+        DrawerItem("Equalizer", "eq", Ic.Sliders),
+        DrawerItem("Sleep timer", "sleep", Ic.Clock, if (sleep.active) "On" else null),
+        DrawerItem("Statistics", "stats", Ic.Stats),
+    )
+
+    @Composable
+    fun DrawerGroup(title: String, items: List<DrawerItem>) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(title, Modifier.padding(horizontal = 6.dp), style = T.kicker, color = c.muted)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+                    .background(c.card.copy(alpha = if (c.dark) 0.72f else 0.90f))
+                    .border(1.dp, c.line.copy(alpha = if (c.dark) 0.35f else 0.25f), RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)),
+            ) {
+                items.forEachIndexed { idx, item ->
+                    if (idx > 0) Box(Modifier.fillMaxWidth().padding(start = 52.dp).height(0.8.dp).background(c.line.copy(alpha = 0.25f)))
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .selectable(false, role = Role.Button) { onNavigate(item.route) }
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Box(Modifier.size(30.dp).clip(RoundedCornerShape(10.dp)).background(c.tint), contentAlignment = Alignment.Center) {
+                            androidx.compose.material3.Icon(item.icon, null, tint = c.text, modifier = Modifier.size(16.dp))
+                        }
+                        Text(item.label, Modifier.weight(1f), style = T.title.copy(fontSize = 15.sp), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        item.badge?.let { b ->
+                            Text(
+                                b,
+                                style = T.kicker.copy(fontSize = 10.sp),
+                                color = if (b == "On" || b == "Online") c.accent else c.muted,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(c.chip)
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().background(Color(0x61000000)).clickable(onClickLabel = "Close menu", onClick = onClose))
+        Box(Modifier.fillMaxSize().background(Color(0x6B000000)).clickable(onClickLabel = "Close menu", onClick = onClose))
         Column(
-            Modifier.fillMaxSize().padding(end = 70.dp).clip(RoundedCornerShape(topEnd = 38.dp, bottomEnd = 38.dp)).background(c.sheet)
-                .verticalScroll(rememberScrollState(), flingBehavior = com.skarif.kairos.ui.motion.rememberIosFling()).statusBarsPadding().navigationBarsPadding().padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            Modifier
+                .fillMaxSize()
+                .padding(end = 64.dp)
+                .clip(RoundedCornerShape(topEnd = 38.dp, bottomEnd = 38.dp))
+                .background(c.sheet)
+                .verticalScroll(rememberScrollState(), flingBehavior = com.skarif.kairos.ui.motion.rememberIosFling())
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                CircleButton(Ic.Close, "Close menu", onClose, size = 44.dp, container = c.ink, content = c.inkFg)
-                Text(mixedHeadline("Your " to false, "music" to true), style = T.h1.copy(fontSize = 26.sp), color = c.text)
+                CircleButton(Ic.Close, "Close menu", onClose, size = 42.dp, container = c.chip, content = c.text)
+                Column(Modifier.weight(1f)) {
+                    Text(mixedHeadline("Kairos " to false, if (vm.onlineName != null) "Online" to true else "Music" to true), style = T.h1.copy(fontSize = 24.sp), color = c.text)
+                }
             }
-            // Theme, one tap away.
-            val settings by vm.settings.collectAsStateWithLifecycle()
-            com.skarif.kairos.ui.components.Segmented(
-                listOf("Light", "Dark", "Auto"),
-                when (settings.themeMode) { com.skarif.kairos.data.ThemeMode.LIGHT -> 0; com.skarif.kairos.data.ThemeMode.DARK -> 1; else -> 2 },
-                { i ->
-                    val mode = listOf(com.skarif.kairos.data.ThemeMode.LIGHT, com.skarif.kairos.data.ThemeMode.DARK, com.skarif.kairos.data.ThemeMode.SYSTEM)[i]
-                    vm.updateSettings { it.copy(themeMode = mode) }
-                },
-            )
-            if (cur != null) {
+
+            cur?.let { song ->
+                val src = if (song.volume == com.skarif.kairos.data.db.ONLINE_VOLUME) "Online" else "Offline"
+                val media = if (now.videoActive) "Video" else "Audio"
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)).background(c.accent)
-                        .clickable(role = Role.Button, onClickLabel = "Open now playing") { onNavigate("now") }.padding(10.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+                        .background(c.accent)
+                        .clickable(role = Role.Button, onClickLabel = "Open now playing") { onNavigate("now") }
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    SongArt(vm, cur, 48.dp, corner = 15.dp)
+                    SongArt(vm, song, 48.dp, corner = 14.dp)
                     Column(Modifier.weight(1f)) {
-                        Text(cur?.title ?: "", style = T.title, color = c.onAccent, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(cur?.artist ?: "", style = T.small, color = c.onAccent, maxLines = 1)
+                        Text("$media · $src".uppercase(), style = T.kicker.copy(fontSize = 9.sp), color = c.onAccent.copy(alpha = 0.8f))
+                        Text(song.title, style = T.title, color = c.onAccent, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(song.artist, style = T.small, color = c.onAccent.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    CircleButton(if (now.isPlaying) Ic.Pause else Ic.Play, if (now.isPlaying) "Pause" else "Play", vm::toggle, size = 44.dp, container = c.ink, content = c.inkFg)
+                    CircleButton(if (now.isPlaying) Ic.Pause else Ic.Play, if (now.isPlaying) "Pause" else "Play", vm::toggle, size = 42.dp, container = c.ink, content = c.inkFg)
                 }
             }
-            // Compact rows: the whole menu fits on one screen on most phones.
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                items.forEach { (label, route, icon) ->
-                    Row(
-                        Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
-                            .selectable(false, role = Role.Button) { onNavigate(route) }.padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Box(Modifier.size(34.dp).clip(RoundedCornerShape(17.dp)).background(c.tint), contentAlignment = Alignment.Center) {
-                            androidx.compose.material3.Icon(icon, null, tint = c.text, modifier = Modifier.size(17.dp))
-                        }
-                        Text(label, style = T.title.copy(fontSize = 16.sp), color = c.text)
-                    }
-                }
+
+            DrawerGroup("BROWSE", browse)
+            DrawerGroup(if (vm.onlineName != null) "ONLINE & OFFLINE" else "LIBRARY", sources)
+            DrawerGroup("PLAYBACK & TOOLS", tools)
+            DrawerGroup("APP", listOf(DrawerItem("Settings", "settings", Ic.Settings)))
+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("APPEARANCE", Modifier.padding(horizontal = 6.dp), style = T.kicker, color = c.muted)
+                com.skarif.kairos.ui.components.Segmented(
+                    listOf("Light", "Dark", "Auto"),
+                    when (settings.themeMode) { com.skarif.kairos.data.ThemeMode.LIGHT -> 0; com.skarif.kairos.data.ThemeMode.DARK -> 1; else -> 2 },
+                    { i ->
+                        val mode = listOf(com.skarif.kairos.data.ThemeMode.LIGHT, com.skarif.kairos.data.ThemeMode.DARK, com.skarif.kairos.data.ThemeMode.SYSTEM)[i]
+                        vm.updateSettings { it.copy(themeMode = mode) }
+                    },
+                )
             }
             Box(Modifier.width(1.dp).height(8.dp))
         }

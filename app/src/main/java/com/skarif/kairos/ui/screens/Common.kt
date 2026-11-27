@@ -151,7 +151,16 @@ private fun SongRowContent(song: SongEntity, playing: Boolean, vm: MainViewModel
         }
         Column(Modifier.weight(1f)) {
             Text(song.title, style = T.title, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(song.artist, style = T.small, color = if (playing) fg.copy(alpha = 0.8f) else c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val tag = when {
+                vm.onlineName == null -> null
+                song.volume != com.skarif.kairos.data.db.ONLINE_VOLUME -> "Offline"
+                song.album == "YouTube" -> "Online · Video"
+                else -> "Online · Audio"
+            }
+            Text(
+                if (tag != null) "${song.artist} · $tag" else song.artist,
+                style = T.small, color = if (playing) fg.copy(alpha = 0.8f) else c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
         }
         Text(formatTime(song.durationMs), style = T.num, color = if (playing) fg else c.muted)
         if (song.volume == com.skarif.kairos.data.db.ONLINE_VOLUME && vm.onlineName != null) {
@@ -485,7 +494,9 @@ fun NoticeBar(vm: MainViewModel, modifier: Modifier = Modifier) {
                 .padding(start = 18.dp, end = 6.dp, top = 6.dp, bottom = 6.dp)
                 .androidx_semantics_live(),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            if (m.isError) Icon(Ic.Info, null, tint = c.accent, modifier = Modifier.size(18.dp))
             Text(m.text, Modifier.weight(1f).padding(vertical = 10.dp), style = T.body, color = c.inkFg, maxLines = 2, overflow = TextOverflow.Ellipsis)
             val undo = m.undo
             if (undo != null) {

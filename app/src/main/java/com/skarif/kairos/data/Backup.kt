@@ -56,6 +56,14 @@ class Backup(private val db: PlayerDatabase, private val settings: SettingsStore
             .put("eqEnabled", s.eqEnabled).put("eqGains", JSONArray(s.eqGains.map { it.toDouble() })).put("bassBoost", s.bassBoost)
             .put("virtualizer", s.virtualizer).put("resumeQueue", s.resumeQueue).put("keepScreenOnLyrics", s.keepScreenOnLyrics)
             .put("ignoreArticles", s.ignoreArticles)
+            .put("skipShortFiles", s.skipShortFiles)
+            .put("readEmbeddedLyrics", s.readEmbeddedLyrics).put("readLrcFiles", s.readLrcFiles)
+            .put("lyricsPreference", s.lyricsPreference.name)
+            .put("fetchLyricsOnline", s.fetchLyricsOnline).put("onlineLyricsType", s.onlineLyricsType.name)
+            .put("outputMode", s.outputMode.name)
+            .put("streamQuality", s.streamQuality.name).put("dataSaverOnMobile", s.dataSaverOnMobile)
+            .put("downloadMode", s.downloadMode.name).put("rememberDownloadChoice", s.rememberDownloadChoice)
+            .put("streamCacheMb", s.streamCacheMb)
         return JSONObject()
             .put("app", "Kairos").put("version", 1).put("createdAt", System.currentTimeMillis())
             .put("songs", songArr).put("favourites", favs).put("playlists", lists).put("plays", plays).put("lyricsOffsets", offsets)
@@ -159,6 +167,18 @@ class Backup(private val db: PlayerDatabase, private val settings: SettingsStore
                     resumeQueue = p.optBoolean("resumeQueue", n.resumeQueue),
                     keepScreenOnLyrics = p.optBoolean("keepScreenOnLyrics", n.keepScreenOnLyrics),
                     ignoreArticles = p.optBoolean("ignoreArticles", n.ignoreArticles),
+                    skipShortFiles = p.optBoolean("skipShortFiles", n.skipShortFiles),
+                    readEmbeddedLyrics = p.optBoolean("readEmbeddedLyrics", n.readEmbeddedLyrics),
+                    readLrcFiles = p.optBoolean("readLrcFiles", n.readLrcFiles),
+                    lyricsPreference = enum("lyricsPreference", LyricsPreference.entries.toTypedArray(), n.lyricsPreference),
+                    fetchLyricsOnline = p.optBoolean("fetchLyricsOnline", n.fetchLyricsOnline),
+                    onlineLyricsType = enum("onlineLyricsType", OnlineLyricsType.entries.toTypedArray(), n.onlineLyricsType),
+                    outputMode = enum("outputMode", OutputMode.entries.toTypedArray(), n.outputMode),
+                    streamQuality = enum("streamQuality", StreamQuality.entries.toTypedArray(), n.streamQuality),
+                    dataSaverOnMobile = p.optBoolean("dataSaverOnMobile", n.dataSaverOnMobile),
+                    downloadMode = enum("downloadMode", DownloadMode.entries.toTypedArray(), n.downloadMode),
+                    rememberDownloadChoice = p.optBoolean("rememberDownloadChoice", n.rememberDownloadChoice),
+                    streamCacheMb = p.optInt("streamCacheMb", n.streamCacheMb).coerceIn(256, 10240),
                 )
             }
             n

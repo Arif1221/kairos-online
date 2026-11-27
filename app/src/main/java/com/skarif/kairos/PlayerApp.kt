@@ -32,6 +32,7 @@ class PlayerApp : Application() {
             }
             previous?.uncaughtException(thread, error)
         }
+        com.skarif.kairos.online.Flavor.online?.init(this)
         container = AppContainer(this)
     }
 

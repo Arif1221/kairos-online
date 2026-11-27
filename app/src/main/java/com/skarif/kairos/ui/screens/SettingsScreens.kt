@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.skarif.kairos.data.LyricsPreference
+import com.skarif.kairos.data.DownloadMode
 import com.skarif.kairos.data.OutputMode
 import com.skarif.kairos.data.ReplayGainMode
 import com.skarif.kairos.data.ThemeMode
@@ -66,9 +67,9 @@ private val SWATCHES = listOf(
 @Composable
 private fun Header(title: String, onBack: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        CircleButton(Ic.Back, "Back", onBack)
+        CircleButton(Ic.Back, "Back", onBack, size = 44.dp)
         Text(title, Modifier.weight(1f), style = T.title, color = P.colors.text, textAlign = TextAlign.Center)
-        Box(Modifier.size(52.dp))
+        Box(Modifier.size(44.dp))
     }
 }
 
@@ -268,13 +269,19 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onFolders: () -> Unit,
             Card(Modifier) {
                 Text("Backup and restore", style = T.h2, color = c.text)
                 Text(
-                    "Saves favourites, playlists, listening history, lyrics timing, hidden songs and settings to one file. " +
-                        "Restoring on a new phone finds your songs by file name and tags, and never deletes anything.",
+                    "Saves ${favs.size} favourites, ${playlists.size} playlists, listening history, lyrics timing, hidden songs, and all settings to one portable JSON file.",
                     style = T.small, color = c.muted,
                 )
+                val lastBackupMs = androidx.compose.runtime.remember {
+                    ctx.getSharedPreferences("backup", android.content.Context.MODE_PRIVATE).getLong("last_backup_at", 0L)
+                }
+                if (lastBackupMs > 0L) {
+                    val formatted = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date(lastBackupMs))
+                    Text("Last backup: $formatted", style = T.kicker.copy(fontSize = 11.sp), color = c.accent)
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Pill("Back up", { backupLauncher.launch("kairos-backup-${java.time.LocalDate.now()}.json") }, icon = Ic.DownArrow, selected = true)
-                    Pill("Restore", { restoreLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, icon = Ic.Up)
+                    Pill("Back up now", { backupLauncher.launch("kairos-backup-${java.time.LocalDate.now()}.json") }, icon = Ic.DownArrow, selected = true)
+                    Pill("Restore…", { restoreLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) }, icon = Ic.Up)
                 }
                 Text("Clear listening history", style = T.small, color = c.muted)
                 Pill("Clear history…", { confirmClear = true }, icon = Ic.Trash)
@@ -425,18 +432,28 @@ private fun DownloadsCard(vm: MainViewModel) {
     Card(Modifier) {
         Text("Downloads & storage", style = T.h2, color = c.text)
 
-        Text("Download button saves", style = T.title, color = c.text)
-        Segmented(listOf("In the app", "To the phone"), if (s.downloadToPhone) 1 else 0, { i ->
-            vm.updateSettings { it.copy(downloadToPhone = i == 1) }
-        })
+        Text("Download option for future songs", style = T.title, color = c.text)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Pill("Audio only", { vm.updateSettings { it.copy(downloadMode = DownloadMode.AUDIO_ONLY) } }, selected = s.downloadMode == DownloadMode.AUDIO_ONLY, icon = Ic.Music)
+            Pill("Audio + video", { vm.updateSettings { it.copy(downloadMode = DownloadMode.AUDIO_VIDEO) } }, selected = s.downloadMode == DownloadMode.AUDIO_VIDEO, icon = Ic.Play)
+            Pill("Save to phone", { vm.updateSettings { it.copy(downloadMode = DownloadMode.SAVE_TO_PHONE) } }, selected = s.downloadMode == DownloadMode.SAVE_TO_PHONE, icon = Ic.Folder)
+        }
+        ToggleRow(
+            "Remember for next songs", s.rememberDownloadChoice,
+            { enabled -> vm.updateSettings { current -> current.copy(rememberDownloadChoice = enabled) } },
+            subtitle = if (s.rememberDownloadChoice) "New Download taps use ${when (s.downloadMode) { DownloadMode.AUDIO_ONLY -> "audio only"; DownloadMode.AUDIO_VIDEO -> "audio + video"; DownloadMode.SAVE_TO_PHONE -> "Save to phone" }} automatically. Change it here any time."
+                else "Off: Kairos asks what to save every time you tap Download.",
+        )
         Text(
-            if (s.downloadToPhone) "Saves an M4A file with title, artist and cover in Music/${com.skarif.kairos.data.PhoneSaver.FOLDER}. " +
-                "Other apps can play it, and it shows in your Library. Delete it from a file manager."
-            else "Kept inside Kairos at your streaming quality; only Kairos plays it. Hold a song for Save to phone when you want a file.",
+            when (s.downloadMode) {
+                DownloadMode.AUDIO_ONLY -> "Audio is kept inside Kairos for offline playback."
+                DownloadMode.AUDIO_VIDEO -> "Audio and the matched music video are kept inside Kairos for offline playback. Video downloads use additional storage."
+                DownloadMode.SAVE_TO_PHONE -> "Saves an M4A file with title, artist and cover in Music/${com.skarif.kairos.data.PhoneSaver.FOLDER}. Other apps can play it."
+            },
             style = T.small, color = c.muted,
         )
 
-        Text("In the app", style = T.title, color = c.text)
+        Text("Downloaded inside Kairos", style = T.title, color = c.text)
         Text(
             if (dlCount == 0) "Nothing downloaded yet."
             else "$dlCount songs, ${dlBytes / 1_048_576} MB. Kept until you remove them.",
@@ -445,16 +462,27 @@ private fun DownloadsCard(vm: MainViewModel) {
         if (dlCount > 0) Pill("Remove all downloads", { confirmRemove = true }, icon = Ic.Trash)
         if (onPhone > 0) Text("Saved to the phone: $onPhone songs in Music/${com.skarif.kairos.data.PhoneSaver.FOLDER}.", style = T.small, color = c.muted)
 
-        Text("Recently streamed", style = T.title, color = c.text)
-        val sizes = listOf(256, 512, 1024, 2048, 4096)
-        // Five sizes don't fit one segmented row on narrow phones; pills wrap.
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            sizes.forEach { mb ->
-                Pill(if (mb < 1024) "$mb MB" else "${mb / 1024} GB", { vm.updateSettings { it.copy(streamCacheMb = mb) } }, selected = s.streamCacheMb == mb)
-            }
+        val cacheLimitLabel = if (s.streamCacheMb < 1024) "${s.streamCacheMb} MB" else String.format("%.1f GB", s.streamCacheMb / 1024f).replace(".0 GB", " GB")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("Streaming cache limit", style = T.title, color = c.text)
+            Text(cacheLimitLabel, style = T.num, color = c.accent)
         }
+        androidx.compose.material3.Slider(
+            value = s.streamCacheMb.toFloat().coerceIn(256f, 10240f),
+            onValueChange = { v ->
+                val snapped = (kotlin.math.round(v / 256f).toInt() * 256).coerceIn(256, 10240)
+                vm.updateSettings { it.copy(streamCacheMb = snapped) }
+            },
+            valueRange = 256f..10240f,
+            steps = (10240 - 256) / 256 - 1,
+            colors = androidx.compose.material3.SliderDefaults.colors(
+                thumbColor = c.accent,
+                activeTrackColor = c.accent,
+                inactiveTrackColor = c.muted.copy(alpha = 0.25f),
+            ),
+        )
         Text(
-            "Songs you stream are kept so they replay without data; the oldest go first. Using ${cacheBytes / 1_048_576} MB now.",
+            "256 MB to 10 GB. Songs you stream are kept so they replay without data; the oldest go first. Using ${cacheBytes / 1_048_576} MB now.",
             style = T.small, color = c.muted,
         )
         Pill("Clear recently streamed", { vm.onlineUi.clearCache() }, icon = Ic.Trash)

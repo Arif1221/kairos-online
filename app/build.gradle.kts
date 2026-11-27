@@ -13,8 +13,8 @@ android {
         minSdk = 28 // DynamicsProcessing (10-band EQ) needs Android 9
         targetSdk = 37
         // Online: main's version + a 4th online number; versionCode = main's * 10 + that number.
-        versionCode = 298
-        versionName = "0.9.1.8"
+        versionCode = 300
+        versionName = "0.9.2.0"
     }
 
     // Release signing comes from the environment (GitHub secrets in CI), never from the repo.
@@ -80,6 +80,7 @@ dependencies {
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
+    implementation(libs.compose.animation)
     implementation(libs.compose.ui.graphics)
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.material3)

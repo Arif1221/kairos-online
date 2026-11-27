@@ -14,13 +14,14 @@ import androidx.media3.datasource.cache.CacheEvictor
 import androidx.media3.datasource.cache.CacheSpan
 import java.util.TreeSet
 import androidx.media3.datasource.cache.NoOpCacheEvictor
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import java.io.File
 
 /**
- * Two caches. Songs streamed once are kept (up to [MAX_BYTES], least recently played go first),
- * so they replay without a connection and seeking doesn't re-download. Songs you download go to
- * a second cache that never evicts, in app storage (not the cache folder Android may clear).
+ * Separate bounded audio/video stream caches plus persistent, non-evicting audio and video
+ * download caches. Video ranges must never evict the much smaller audio streams; explicit
+ * downloads live outside Android's clearable cache directory.
  */
 @OptIn(UnstableApi::class)
 internal object StreamCache {
@@ -37,6 +38,8 @@ internal object StreamCache {
     @Volatile private var db: StandaloneDatabaseProvider? = null
     @Volatile private var streams: SimpleCache? = null
     @Volatile private var saved: SimpleCache? = null
+    @Volatile private var video: SimpleCache? = null
+    @Volatile private var savedVideo: SimpleCache? = null
 
     /** One database for both caches; each SimpleCache is one per folder per process, as it requires. */
     private fun db(context: Context) = db ?: synchronized(this) {
@@ -53,6 +56,21 @@ internal object StreamCache {
             .also { saved = it }
     }
 
+    /** Persistent video downloads; kept outside cacheDir so Android cannot evict them. */
+    fun videoDownloads(context: Context): SimpleCache = savedVideo ?: synchronized(this) {
+        savedVideo ?: SimpleCache(File(context.applicationContext.filesDir, "video-downloads"), NoOpCacheEvictor(), db(context))
+            .also { savedVideo = it }
+    }
+
+    /** Separate bounded cache: video ranges must never evict the much smaller audio streams. */
+    fun videos(context: Context): SimpleCache = video ?: synchronized(this) {
+        video ?: SimpleCache(
+            File(context.applicationContext.cacheDir, "video-prefetch"),
+            LeastRecentlyUsedCacheEvictor(128L * 1024 * 1024),
+            db(context),
+        ).also { video = it }
+    }
+
     /** Fully cached under [key]: the length is known and every byte is on disk. */
     fun isComplete(cache: Cache, key: String): Boolean {
         val length = ContentMetadata.getContentLength(cache.getContentMetadata(key))
@@ -62,8 +80,9 @@ internal object StreamCache {
     fun isComplete(context: Context, key: String): Boolean = isComplete(get(context), key)
 
     fun clear(context: Context) {
-        val cache = get(context)
-        cache.keys.toList().forEach { cache.removeResource(it) }
+        listOf(get(context), videos(context)).forEach { cache ->
+            cache.keys.toList().forEach { cache.removeResource(it) }
+        }
     }
 }
 
@@ -105,22 +124,24 @@ internal class AdjustableLruEvictor(private val max: () -> Long) : CacheEvictor 
     }
 }
 
-/** Sends our "kairos-yt:" Uris to [online] (cached YouTube) and everything else, like local files, to [local]. */
+/**
+ * Sends our Uris to the source that knows them ([online]: scheme to data source, e.g. cached
+ * YouTube audio, or uncached YouTube video) and everything else, like local files, to [local].
+ */
 @OptIn(UnstableApi::class)
 internal class RoutingDataSource(
-    private val scheme: String,
+    private val online: Map<String, DataSource>,
     private val local: DataSource,
-    private val online: DataSource,
 ) : DataSource {
     private var current: DataSource? = null
 
     override fun addTransferListener(transferListener: TransferListener) {
         local.addTransferListener(transferListener)
-        online.addTransferListener(transferListener)
+        online.values.forEach { it.addTransferListener(transferListener) }
     }
 
     override fun open(dataSpec: DataSpec): Long {
-        val source = if (dataSpec.uri.scheme == scheme) online else local
+        val source = online[dataSpec.uri.scheme] ?: local
         current = source
         return source.open(dataSpec)
     }

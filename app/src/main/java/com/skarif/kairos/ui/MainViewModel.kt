@@ -42,11 +42,14 @@ import com.skarif.kairos.data.db.PlayEventEntity
 import com.skarif.kairos.data.db.SongEntity
 import com.skarif.kairos.data.db.isOnline
 import com.skarif.kairos.online.Flavor
+import com.skarif.kairos.online.VideoState
 import com.skarif.kairos.lyrics.Lyrics
 import com.skarif.kairos.playback.NowPlaying
 import com.skarif.kairos.playback.SleepState
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -56,6 +59,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -63,6 +68,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transformLatest
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
@@ -94,7 +100,7 @@ data class GenreUi(val name: String, val songs: List<SongEntity>)
 data class LibraryHits(val songs: Set<Long>, val albums: Set<Long>, val artists: Set<String>, val genres: Set<String>)
 
 /** A short message at the bottom of the screen, with Undo when the action can be undone. */
-data class Notice(val text: String, val undo: (() -> Unit)? = null, val id: Long = System.nanoTime())
+data class Notice(val text: String, val undo: (() -> Unit)? = null, val isError: Boolean = false, val id: Long = System.nanoTime())
 
 data class SearchHits(
     val artists: List<ArtistUi> = emptyList(),
@@ -211,11 +217,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * song not indexed yet). The database lookup alone made the player show the new song
      * about 200 ms after the tap.
      */
-    val currentSong: StateFlow<SongEntity?> = now.map { it.songId }.distinctUntilChanged()
+    // A null songId while the queue still has items is a stream swap in progress, not "nothing playing".
+    private val currentSongRaw: Flow<SongEntity?> = now.filter { it.songId != null || it.queueSize == 0 }.map { it.songId }.distinctUntilChanged()
         .flatMapLatest { id ->
             when {
                 id == null -> flowOf(null)
                 else -> songById.map { it[id] }.distinctUntilChanged().flatMapLatest { s -> if (s != null) flowOf(s) else ct.db.songs().observe(id) }
+            }
+        }
+
+    /**
+     * [currentSongRaw], but a "no song" that lasts under a few seconds is ignored. Switching a song
+     * between its sound and its video swaps the playing item, and for the seconds that takes the
+     * player reports no current song; the whole player (and the mini player) used to disappear then.
+     */
+    val currentSong: StateFlow<SongEntity?> = currentSongRaw
+        .transformLatest { s ->
+            if (s != null) emit(s) else {
+                kotlinx.coroutines.delay(4_000)
+                android.util.Log.w("KairosNow", "currentSong -> null after grace: queue=${now.value.queueSize} index=${now.value.queueIndex} playing=${now.value.isPlaying} video=${now.value.videoActive}")
+                emit(null)
             }
         }
         .state(null)
@@ -283,7 +304,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (count > bestCount) { best = i; bestCount = count }
         }
         if (bestCount >= 1) lines[best].timeMs else null
-    }.distinctUntilChanged().state(null)
+    }.flowOn(Dispatchers.Default).distinctUntilChanged().state(null)
 
     val lyricsOffset: StateFlow<Long> = currentSong
         .flatMapLatest { s -> if (s == null) flowOf(0L) else ct.lyrics.observeOffset(s.id) }
@@ -294,7 +315,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     ) { lists, items, byId ->
         val grouped = items.groupBy { it.playlistId }
         lists.map { p -> PlaylistUi(p.id, p.name, grouped[p.id].orEmpty().sortedBy { it.position }.mapNotNull { byId[it.songId] }) }
-    }.state(emptyList())
+    }.flowOn(Dispatchers.Default).state(emptyList())
 
     /** Artists from split tags, most songs first. Computed off the main thread. */
     val artists: StateFlow<List<ArtistUi>> = songs.map { all ->
@@ -531,8 +552,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun backupTo(uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
-                val json = backup.export(songs.value)
+                val json = backup.export(allSongs.value)
                 getApplication<Application>().contentResolver.openOutputStream(uri, "wt")!!.use { it.write(json.toByteArray()) }
+                getApplication<Application>().getSharedPreferences("backup", android.content.Context.MODE_PRIVATE)
+                    .edit().putLong("last_backup_at", System.currentTimeMillis()).apply()
             }.onSuccess { toast("Backup saved") }.onFailure { toast("Couldn't save the backup: ${it.message}") }
         }
     }
@@ -541,7 +564,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 val json = getApplication<Application>().contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
-                backup.restore(json, songs.value)
+                backup.restore(json, allSongs.value)
             }.onSuccess { r ->
                 toast(
                     "Restored ${r.favourites} favourites, ${r.playlists} playlists, ${r.plays} plays" +
@@ -741,6 +764,172 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Online songs aren't in [songById] until kept; this finds them either way. */
     fun anySong(id: Long): SongEntity? = songById.value[id] ?: seenOnline[id]
 
+    // ---------------------------------------------------------------- video (online flavor)
+
+    /**
+     * The listener asked for the picture, not just the sound. Per song and per visit: it resets
+     * when the song changes, when the player closes and when the app goes to the background
+     * (video costs ten times the data of a song, and nothing is looking at it then).
+     */
+    private fun videoPrefetchQuality(): com.skarif.kairos.data.StreamQuality {
+        val s = settings.value
+        val metered = getApplication<Application>()
+            .getSystemService(android.net.ConnectivityManager::class.java)
+            ?.isActiveNetworkMetered == true
+        return if (s.dataSaverOnMobile && metered) com.skarif.kairos.data.StreamQuality.LOW else s.streamQuality
+    }
+
+    private val videoWanted = MutableStateFlow(false)
+    val wantsVideo: StateFlow<Boolean> = videoWanted.asStateFlow()
+
+    // Remember the user's Song/Video choice while the full player is minimized. The active
+    // request is still turned off in mini-player mode so video data/decoding is not kept running
+    // without a visible video surface. Reopening the player restores this preference.
+    private val videoPreferred = MutableStateFlow(false)
+
+    /** The full player is open: only then is the song's video looked for (one search per song). */
+    private val playerOpen = MutableStateFlow(false)
+    private val videoRetryTick = MutableStateFlow(0)
+    private var minimizeVideoGraceJob: kotlinx.coroutines.Job? = null
+
+    fun retryVideoCheck() { videoRetryTick.value++ }
+
+    val videoSize = ct.player.videoSize
+    val videoFirstFrame = ct.player.firstFrame
+
+    /** Whether the playing song can be shown as a video; [VideoState.None] hides the Song/Video switch. */
+    val videoState: StateFlow<VideoState> = combine(
+        currentSong.distinctUntilChangedBy { it?.id },
+        combine(playerOpen, videoPreferred) { open, pref -> open || pref }.distinctUntilChanged(),
+        videoRetryTick,
+    ) { s, active, _ -> s to active }
+        .distinctUntilChanged()
+        .flatMapLatest { (s, open) ->
+            val online = Flavor.online
+            if (s == null || online == null || !s.isOnline || !open) flowOf<VideoState>(VideoState.None)
+            else flow<VideoState> {
+                emit(VideoState.Checking)
+                try {
+                    val id = online.videoFor(s)
+                    emit(if (id != null) VideoState.Available(s.id, id) else VideoState.Unavailable)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.w("KairosVideo", "video lookup failed temporarily for ${s.id}", e)
+                    emit(VideoState.Error(onlineUi.describeError(e)))
+                }
+            }
+        }
+        .always(VideoState.None)
+
+    fun setVideo(on: Boolean) {
+        if (on && videoState.value !is VideoState.Available) return
+        minimizeVideoGraceJob?.cancel()
+        videoPreferred.value = on
+        videoWanted.value = on
+    }
+
+    /** Drop both the active video request and its preference (e.g. app sent to background). */
+    fun dropVideo() {
+        minimizeVideoGraceJob?.cancel()
+        videoPreferred.value = false
+        videoWanted.value = false
+    }
+
+    fun setPlayerOpen(open: Boolean) {
+        playerOpen.value = open
+        if (open) {
+            minimizeVideoGraceJob?.cancel()
+            videoWanted.value = videoPreferred.value
+        } else if (videoWanted.value) {
+            // Brief grace period while minimizing so browsing tabs and reopening the player
+            // does not pause and re-buffer audio by swapping streams immediately.
+            minimizeVideoGraceJob?.cancel()
+            minimizeVideoGraceJob = viewModelScope.launch {
+                kotlinx.coroutines.delay(15_000)
+                if (!playerOpen.value) videoWanted.value = false
+            }
+        }
+    }
+
+    fun attachVideo(view: android.view.TextureView) = ct.player.attachVideo(view)
+    fun detachVideo(view: android.view.TextureView) = ct.player.detachVideo(view)
+
+    init {
+        // Keep the user's Video preference across tracks. Tracks without a match remain audio-only;
+        // the next track with a valid match can automatically return to video.
+        viewModelScope.launch {
+            now.map { it.songId }.filterNotNull().distinctUntilChanged().collect {
+                videoWanted.value = (playerOpen.value || videoWanted.value) && videoPreferred.value
+            }
+        }
+        ct.player.onVideoError = { why ->
+            if (videoWanted.value) notify("Couldn't play video ($why) — playing audio", isError = true)
+            // Keep the preference, but stop retrying this track in a tight loop. The next track
+            // change re-arms videoWanted and can resume video if that track has a valid match.
+            videoWanted.value = false
+        }
+        ct.player.onPlaybackError = { title, why, skipped ->
+            val prefix = if (!title.isNullOrBlank()) "Couldn't play \"$title\"" else "Couldn't play song"
+            val suffix = if (skipped) " · Skipping" else ""
+            notify("$prefix: $why$suffix", isError = true)
+        }
+        // Keeps what plays in step with what was asked. Prepare a short video range while audio
+        // continues, then swap. A failed prefetch is non-fatal: normal streaming remains the fallback.
+        viewModelScope.launch {
+            combine(videoWanted, videoState, now.map { it.videoActive }.distinctUntilChanged()) { wanted, st, active -> Triple(wanted, st, active) }
+                .collectLatest { (wanted, st, active) ->
+                    val online = Flavor.online ?: return@collectLatest
+                    val song = currentSong.value ?: return@collectLatest
+                    // An answer for the song before this one must not turn this one into its video.
+                    if (wanted && active && st is VideoState.Checking) return@collectLatest
+                    val target = wanted && st is VideoState.Available && st.songId == now.value.songId && st.songId == song.id
+                    when {
+                        target && !active -> {
+                            val quality = videoPrefetchQuality()
+                            try {
+                                val prefetched = withTimeoutOrNull(6_000) {
+                                    online.prefetchVideo(getApplication(), song, quality)
+                                    true
+                                } ?: false
+                                if (!prefetched) android.util.Log.w("KairosVideo", "startup prefetch timed out; falling back to streaming")
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                android.util.Log.w("KairosVideo", "startup prefetch failed; falling back to streaming", e)
+                            }
+                            // Do not switch if the user turned video off or changed songs while prefetching.
+                            if (videoWanted.value && now.value.songId == song.id) {
+                                val ready = videoState.value as? VideoState.Available
+                                if (ready?.songId == song.id) ct.player.swapStream(online.videoUri(ready.videoId))
+                            }
+                        }
+                        !target && active -> ct.player.swapStream(online.mediaUri(song))
+                    }
+                }
+        }
+
+        // Prepare only the next song's match and stream metadata. No video bytes are downloaded
+        // until the listener explicitly enables Video for that song.
+        viewModelScope.launch {
+            now.map { n -> n.queue.getOrNull(n.queuePosition + 1)?.songId }
+                .distinctUntilChanged()
+                .collectLatest { nextId ->
+                    val online = Flavor.online ?: return@collectLatest
+                    val id = nextId ?: return@collectLatest
+                    val song = anySong(id) ?: songById.first { it.containsKey(id) }[id] ?: return@collectLatest
+                    if (!song.isOnline) return@collectLatest
+                    try {
+                        online.prefetchVideoMetadata(song, videoPrefetchQuality())
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        android.util.Log.d("KairosVideo", "next-track metadata prefetch skipped: ${e.message}")
+                    }
+                }
+        }
+    }
+
     private val _playingFrom = MutableStateFlow<String?>(null)
     /** "Playing from" label for the player: the album, playlist or screen the queue came from. */
     val playingFrom: StateFlow<String?> = _playingFrom.asStateFlow()
@@ -753,18 +942,36 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * Autoplay keeps it going when those run out.
      */
     fun startRadio(song: SongEntity) {
+        val alreadyPlaying = now.value.songId == song.id
         if (song.isOnline) {
-            // Online radio is YouTube's mix for the song, added once it arrives.
-            play(listOf(song), 0, from = "${song.title} radio")
+            if (!alreadyPlaying) {
+                play(listOf(song), 0, from = "${song.title} radio")
+            } else {
+                _playingFrom.value = "${song.title} radio"
+                notify("Loading ${song.title} radio…")
+            }
             viewModelScope.launch {
                 val more = onlineUi.radio(song).filter { it.id != song.id }
-                if (more.isEmpty()) notify(if (onlineUi.networkUp.value) "Couldn't load radio for ${song.title}" else "Radio needs a connection")
-                else if (now.value.songId == song.id) { keepOnline(more); ct.player.append(more) }
+                if (more.isEmpty()) {
+                    notify(if (onlineUi.networkUp.value) "Couldn't load radio for ${song.title}" else "Radio needs a connection")
+                } else if (now.value.songId == song.id) {
+                    keepOnline(more)
+                    if (alreadyPlaying) ct.player.clearUpcoming()
+                    ct.player.append(more)
+                    if (alreadyPlaying) notify("Queue updated with ${more.size} radio songs")
+                }
             }
             return
         }
         val more = similarSongs(listOf(song), songs.value, historyFlow.value.taste, 50, kotlin.random.Random.Default, blocked.value, drift = true)
-        play(listOf(song) + more, 0, from = "${song.title} radio")
+        if (alreadyPlaying) {
+            _playingFrom.value = "${song.title} radio"
+            ct.player.clearUpcoming()
+            ct.player.append(more)
+            notify("Queue updated with ${more.size} radio songs")
+        } else {
+            play(listOf(song) + more, 0, from = "${song.title} radio")
+        }
     }
 
     fun setSpeed(v: Float) { ct.player.setSpeed(v) }
@@ -849,8 +1056,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun removePlaylistCover(id: Long) {
-        coverDir.listFiles().orEmpty().filter { it.name.startsWith("$id-") }.forEach { it.delete() }
-        _covers.value = readCovers()
+        viewModelScope.launch(Dispatchers.IO) {
+            coverDir.listFiles().orEmpty().filter { it.name.startsWith("$id-") }.forEach { it.delete() }
+            _covers.value = readCovers()
+        }
     }
 
     fun exportPlaylist(id: Long, uri: Uri) {
@@ -886,7 +1095,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _notice = MutableStateFlow<Notice?>(null)
     val notice: StateFlow<Notice?> = _notice.asStateFlow()
-    fun notify(text: String, undo: (() -> Unit)? = null) { _notice.value = Notice(text, undo) }
+    fun notify(text: String, isError: Boolean = false, undo: (() -> Unit)? = null) { _notice.value = Notice(text, undo, isError) }
     fun dismissNotice(id: Long) { if (_notice.value?.id == id) _notice.value = null }
 
     private suspend fun toast(text: String) = kotlinx.coroutines.withContext(Dispatchers.Main) { notify(text) }

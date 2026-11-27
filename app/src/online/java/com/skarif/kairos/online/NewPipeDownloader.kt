@@ -15,6 +15,8 @@ internal object NewPipeDownloader : Downloader() {
     const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0"
 
     private val client = OkHttpClient.Builder()
+        .connectionPool(okhttp3.ConnectionPool(8, 5, TimeUnit.MINUTES))
+        .retryOnConnectionFailure(true)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()

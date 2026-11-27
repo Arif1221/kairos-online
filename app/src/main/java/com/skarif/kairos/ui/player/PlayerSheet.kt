@@ -110,6 +110,8 @@ class PlayerController(private val scope: CoroutineScope) {
     val skipX = Animatable(0f)
     /** A cover swipe changed song (-1 next, 1 previous) and is waiting for the new song to arrive. */
     internal var pendingSkip = 0
+    /** Video defaults to filling/cropping the cover; double-tap switches to fit-the-whole-frame. */
+    var videoFill by mutableStateOf(true)
     /** Vinyl mode: the cover becomes a spinning record (long-press the cover). */
     var vinyl by mutableStateOf(false)
     /** The record's angle in degrees. Read only while drawing. */
@@ -250,6 +252,7 @@ fun PlayerSheet(
     val song by vm.currentSong.collectAsStateWithLifecycle()
     val now by vm.now.collectAsStateWithLifecycle()
     val art by vm.artwork.collectAsStateWithLifecycle()
+    val wantsVideo by vm.wantsVideo.collectAsStateWithLifecycle()
     val s = song
     LaunchedEffect(s == null) { if (s == null) ctrl.progress.snapTo(0f) }
     if (s == null) return
@@ -282,6 +285,15 @@ fun PlayerSheet(
     }
 
     val open by remember { derivedStateOf { ctrl.progress.value > 0.001f } }
+    // Track player open/close at the PlayerSheet level (not inside NowPlayingPane) so switching
+    // between Main, Lyrics, and Queue never drops or restarts the active video stream.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner, open) {
+        vm.setPlayerOpen(open)
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, e -> if (e == androidx.lifecycle.Lifecycle.Event.ON_STOP) vm.dropVideo() }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     // Long-press on the mini player: the full player's menu, without opening the player.
     var miniMenu by remember { mutableStateOf(false) }
     if (miniMenu) com.skarif.kairos.ui.screens.PlayerMenu(
@@ -296,7 +308,14 @@ fun PlayerSheet(
     // Back closes the player interactively: a back swipe pulls the sheet down under your thumb
     // (predictive back), and letting go either finishes closing or springs it back open.
     // On a lyrics or queue page, back returns to the main player.
-    androidx.activity.compose.PredictiveBackHandler(enabled = ctrl.isOpen) { events ->
+    // Stays enabled a moment after the player closes: the system keeps animating the back gesture
+    // after it was committed, and calling a handler that was already disabled crashes
+    // ("This input is not added to any dispatcher").
+    val backEnabled = remember { androidx.compose.runtime.mutableStateOf(false) }
+    LaunchedEffect(ctrl.isOpen) {
+        if (ctrl.isOpen) backEnabled.value = true else { kotlinx.coroutines.delay(600); backEnabled.value = false }
+    }
+    androidx.activity.compose.PredictiveBackHandler(enabled = backEnabled.value) { events ->
         val onMain = ctrl.page == PlayerPage.MAIN
         try {
             events.collect { e -> if (onMain) ctrl.backProgress(e.progress) }
@@ -454,8 +473,9 @@ fun PlayerSheet(
                             shape = VinylShape(vt, top, bottom)
                             rotationZ = ctrl.vinylAngle * vt
                             shadowElevation = 20.dp.toPx() * vt
-                        } else if (offset == 0 && ctrl.page == PlayerPage.MAIN) {
+                        } else if (offset == 0 && ctrl.page == PlayerPage.MAIN && !wantsVideo) {
                             // Shrink toward the centre while paused, only once the player is open.
+                            // (Not for video: a picture that shrinks on pause looks like a glitch.)
                             val k = ((1f - pauseScale) / 0.06f).coerceIn(0f, 1f) * p.coerceIn(0f, 1f)
                             val s = (1f - 0.06f * k).coerceAtMost(1f)
                             scaleX = s; scaleY = s
@@ -476,6 +496,8 @@ fun PlayerSheet(
                     },
             ) {
                 if (img != null) Image(img, desc, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                // Video mode: the video over the cover, on the hero only (not the small thumbnails of the other pages).
+                if (offset == 0 && ctrl.page == PlayerPage.MAIN && wantsVideo) VideoLayer(vm, ctrl.videoFill) { ctrl.videoFill = !ctrl.videoFill }
             }
         }
         // Neighbours only once the cover has settled in the hero; during the move between pages

@@ -4,7 +4,7 @@
 
 # Kairos Online
 
-**Kairos, plus YouTube Music and YouTube (audio only): streaming, one Home for online and local music, downloads and synced lyrics, in the same player.**
+**Kairos, plus YouTube Music and YouTube (audio, or video for songs that have one): streaming, one Home for online and local music, downloads and synced lyrics, in the same player.**
 
 [![Latest release](https://img.shields.io/github/v/release/Arif1221/kairos-online?label=release&color=8B6CFF)](https://github.com/Arif1221/kairos-online/releases)
 [![Build](https://img.shields.io/github/actions/workflow/status/Arif1221/kairos-online/build.yml?branch=main)](https://github.com/Arif1221/kairos-online/actions/workflows/build.yml)

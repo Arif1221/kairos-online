@@ -78,7 +78,8 @@ import com.skarif.kairos.ui.screens.StatsScreen
 import com.skarif.kairos.ui.screens.hasAudioPermission
 import com.skarif.kairos.ui.theme.P
 import com.skarif.kairos.ui.theme.PlayerTheme
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
@@ -104,15 +105,27 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // A first run (or a restore without the music permission) starts on the welcome screen.
-        // Read the stored flag before the first frame so a returning user never sees it flash.
-        val onboarded = runBlocking { (application as PlayerApp).container.settings.load().onboarded }
-        val start = when {
-            onboarded && hasAudioPermission(this) -> "home"
-            // Online build: streaming needs no permission, so someone who skipped the library starts on Explore.
-            onboarded && com.skarif.kairos.online.Flavor.online != null -> "home"
-            else -> "onboarding"
+        // Load asynchronously so we don't block the main thread on DataStore disk I/O in onCreate.
+        setContent {
+            var start by remember { mutableStateOf<String?>(null) }
+            LaunchedEffect(Unit) {
+                val onboarded = withContext(Dispatchers.IO) {
+                    (application as PlayerApp).container.settings.load().onboarded
+                }
+                start = when {
+                    onboarded && hasAudioPermission(this@MainActivity) -> "home"
+                    // Online build: streaming needs no permission, so someone who skipped the library starts on Explore.
+                    onboarded && com.skarif.kairos.online.Flavor.online != null -> "home"
+                    else -> "onboarding"
+                }
+            }
+            val destination = start
+            if (destination == null) {
+                Box(Modifier.fillMaxSize().background(Color.Black))
+            } else {
+                PlayerRoot(destination)
+            }
         }
-        setContent { PlayerRoot(start) }
         com.skarif.kairos.perf.PerfLog.install(window)
     }
 
@@ -215,11 +228,20 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
         }
 
         // Shown once after a crash, so the report can be copied and sent.
-        var crash by remember { mutableStateOf(java.io.File(context.filesDir, PlayerApp.CRASH_FILE).takeIf { it.exists() }?.readText()) }
+        var crash by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(Unit) {
+            crash = withContext(Dispatchers.IO) {
+                java.io.File(context.filesDir, PlayerApp.CRASH_FILE).takeIf { it.exists() }?.readText()
+            }
+        }
+        fun clearCrash() {
+            crash = null
+            scope.launch(Dispatchers.IO) { java.io.File(context.filesDir, PlayerApp.CRASH_FILE).delete() }
+        }
         crash?.let { text ->
             val clipboard = androidx.compose.ui.platform.LocalClipboard.current
             com.skarif.kairos.ui.components.KairosDialog(
-                onDismissRequest = { java.io.File(context.filesDir, PlayerApp.CRASH_FILE).delete(); crash = null },
+                onDismissRequest = ::clearCrash,
                 containerColor = P.colors.sheet,
                 title = { Text("Kairos stopped last time", color = P.colors.text) },
                 text = {
@@ -232,11 +254,11 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                 confirmButton = {
                     androidx.compose.material3.TextButton({
                         scope.launch { clipboard.setClipEntry(androidx.compose.ui.platform.ClipEntry(android.content.ClipData.newPlainText("Kairos crash", text))) }
-                        java.io.File(context.filesDir, PlayerApp.CRASH_FILE).delete(); crash = null
+                        clearCrash()
                     }) { Text("Copy report", color = P.colors.text) }
                 },
                 dismissButton = {
-                    androidx.compose.material3.TextButton({ java.io.File(context.filesDir, PlayerApp.CRASH_FILE).delete(); crash = null }) { Text("Close", color = P.colors.muted) }
+                    androidx.compose.material3.TextButton(::clearCrash) { Text("Close", color = P.colors.muted) }
                 },
             )
         }

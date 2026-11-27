@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -104,9 +105,9 @@ fun HomeScreen(
     ScreenBackground {
         Column(
             Modifier.fillMaxSize()
-                
                 .verticalScroll(scroll, overscrollEffect = band, flingBehavior = com.skarif.kairos.ui.motion.rememberIosFling())
-                .padding(bottom = 230.dp),
+                .navigationBarsPadding()
+                .padding(bottom = LocalBottomClearance.current + 100.dp),
             verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             Column(
@@ -125,7 +126,7 @@ fun HomeScreen(
                     )
                     Text(
                         "${java.text.NumberFormat.getIntegerInstance().format(songs.size)} songs, ${playlists.size} playlists",
-                        style = T.small, color = c.muted,
+                        style = T.small.copy(fontFeatureSettings = "tnum"), color = c.muted,
                     )
                 }
                 androidx.compose.runtime.CompositionLocalProvider(com.skarif.kairos.ui.components.LocalPillContainer provides chip) {
@@ -149,16 +150,20 @@ fun HomeScreen(
             }
             // Rediscover: one song you loved and drifted away from, one tap to hear it again.
             val gem = byKey["forgotten"]?.songs?.firstOrNull()?.takeIf { rightNow?.key != "forgotten" }
+            val hairline = c.line.copy(alpha = if (c.dark) 0.45f else 0.30f)
             if (gem != null) {
                 Row(
                     Modifier.padding(horizontal = 18.dp).fillMaxWidth()
                         .cardClick("Play ${gem.title}", onLongClick = { songMenu = gem }) { vm.play(listOf(gem), 0, "Rediscover"); onOpenNowPlaying() }
-                        .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)).background(card).padding(10.dp),
+                        .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+                        .background(card)
+                        .border(1.dp, hairline, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+                        .padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     SongArt(vm, gem, 44.dp, corner = 14.dp)
                     Column(Modifier.weight(1f)) {
-                        Text("REDISCOVER", style = T.small.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp), color = c.accent)
+                        Text("REDISCOVER", style = T.kicker, color = c.accent)
                         Text("${gem.title} · ${gem.artist}", style = T.title.copy(fontSize = 15.sp), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Icon(Ic.Play, null, Modifier.size(20.dp), tint = c.text)
@@ -187,7 +192,10 @@ fun HomeScreen(
                 val idx = album.songs.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
                 Column(
                     Modifier.padding(horizontal = 18.dp).fillMaxWidth().cardClick("Open player", onClick = onOpenNowPlaying)
-                        .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card)).background(card).padding(14.dp),
+                        .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
+                        .background(card)
+                        .border(1.dp, hairline, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
+                        .padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -221,7 +229,9 @@ fun HomeScreen(
                             Modifier.width(150.dp).cardClick("Play ${s2.title}", onLongClick = { songMenu = s2 }) { vm.play(recent, i, "Recently played"); onOpenNowPlaying() },
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            SongArt(vm, s2, 150.dp, corner = 30.dp)
+                            Box(Modifier.clip(RoundedCornerShape(30.dp)).border(1.dp, hairline, RoundedCornerShape(30.dp))) {
+                                SongArt(vm, s2, 150.dp, corner = 30.dp)
+                            }
                             Column(Modifier.padding(horizontal = 4.dp)) {
                                 Text(s2.title, style = T.title.copy(fontSize = 15.sp), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(s2.artist, style = T.small, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -273,13 +283,19 @@ fun HomeScreen(
 
 @Composable
 private fun Section(title: String, action: String? = null, order: Int = 0, onAction: () -> Unit = {}) {
+    val c = P.colors
+    val hairline = c.line.copy(alpha = if (c.dark) 0.45f else 0.30f)
     Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, Modifier.weight(1f), style = T.h2.copy(fontSize = 22.sp), color = P.colors.text)
+        Text(title, Modifier.weight(1f), style = T.h2.copy(fontSize = 22.sp), color = c.text)
         if (action != null) {
             Text(
                 action,
-                Modifier.clip(RoundedCornerShape(16.dp)).clickable(role = Role.Button, onClick = onAction).padding(horizontal = 10.dp, vertical = 6.dp),
-                style = T.small.copy(fontWeight = FontWeight.SemiBold), color = P.colors.muted,
+                Modifier.clip(RoundedCornerShape(16.dp))
+                    .background(c.card.copy(alpha = if (c.dark) 0.85f else 0.92f))
+                    .border(1.dp, hairline, RoundedCornerShape(16.dp))
+                    .clickable(role = Role.Button, onClick = onAction)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                style = T.small.copy(fontWeight = FontWeight.SemiBold), color = c.text,
             )
         }
     }
@@ -289,16 +305,20 @@ private fun Section(title: String, action: String? = null, order: Int = 0, onAct
 @Composable
 private fun QuickPick(vm: MainViewModel, m: Collection, card: androidx.compose.ui.graphics.Color, modifier: Modifier, onOpen: () -> Unit) {
     val c = P.colors
+    val hairline = c.line.copy(alpha = if (c.dark) 0.45f else 0.30f)
     val menu = LocalCollectionMenu.current
     Row(
         modifier.height(72.dp).cardClick("Open ${m.title}", onLongClick = { menu(m.key) }, onClick = onOpen)
-            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)).background(card).padding(8.dp),
+            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+            .background(card)
+            .border(1.dp, hairline, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+            .padding(8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         SongArt(vm, m.songs.firstOrNull(), 56.dp, corner = 18.dp)
         Column(Modifier.weight(1f)) {
             Text(m.title, style = T.title.copy(fontSize = 15.sp, lineHeight = 18.sp), color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text("${m.songs.size} songs", style = T.small, color = c.muted, maxLines = 1)
+            Text("${m.songs.size} songs", style = T.small.copy(fontFeatureSettings = "tnum"), color = c.muted, maxLines = 1)
         }
     }
 }
@@ -306,12 +326,16 @@ private fun QuickPick(vm: MainViewModel, m: Collection, card: androidx.compose.u
 @Composable
 private fun MixCard(vm: MainViewModel, m: Collection, card: androidx.compose.ui.graphics.Color, modifier: Modifier = Modifier, onOpen: () -> Unit, onPlay: () -> Unit) {
     val c = P.colors
+    val hairline = c.line.copy(alpha = if (c.dark) 0.45f else 0.30f)
     val menu = LocalCollectionMenu.current
     Row(
         modifier
             .sharedCard("col-${m.key}", RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
             .cardClick("Open ${m.title}", onLongClick = { menu(m.key) }, onClick = onOpen)
-            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card)).background(card).padding(12.dp),
+            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
+            .background(card)
+            .border(1.dp, hairline, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
+            .padding(12.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

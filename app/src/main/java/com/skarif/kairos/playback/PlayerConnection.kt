@@ -4,10 +4,13 @@ import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
+import android.view.TextureView
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.skarif.kairos.data.db.SongEntity
@@ -44,10 +47,21 @@ data class NowPlaying(
     /** "25 of 2071" for the screens: the whole intended queue, even while it is still being added. */
     val shownPosition: Int = 0,
     val shownSize: Int = 0,
+    /** The current song is playing as a video (its Uri is a [VIDEO_SCHEME] one). */
+    val videoActive: Boolean = false,
 )
 
+/** Uri scheme of an online video; the online flavor's data source plays it with its picture. */
+const val VIDEO_SCHEME = "kairos-ytv"
+
 /** [index] is the player's media item index; [songId] the song. */
-data class QueueEntry(val index: Int, val songId: Long)
+data class QueueEntry(
+    val index: Int,
+    val songId: Long,
+    /** Media3 metadata survives even if the corresponding local DB row is temporarily absent. */
+    val title: String = "",
+    val artist: String = "",
+)
 
 /** The UI's handle on the playback service, through a MediaController. */
 class PlayerConnection(private val context: Context, private val appScope: CoroutineScope) {
@@ -61,7 +75,24 @@ class PlayerConnection(private val context: Context, private val appScope: Corou
     private val _position = MutableStateFlow(0L)
     val position: StateFlow<Long> = _position.asStateFlow()
 
+    private val _videoSize = MutableStateFlow(VideoSize.UNKNOWN)
+    /** Size of the video's picture, for fitting it into the cover. */
+    val videoSize: StateFlow<VideoSize> = _videoSize.asStateFlow()
+
+    private val _firstFrame = MutableStateFlow(false)
+    /** True once the video has drawn a frame since the last switch; until then the cover stays up. */
+    val firstFrame: StateFlow<Boolean> = _firstFrame.asStateFlow()
+
+    /** Called when the video of the playing song fails to load or play. */
+    @Volatile var onVideoError: (String) -> Unit = {}
+
+    /** Called when audio playback fails (with song title, human-readable reason, and whether it skipped). */
+    @Volatile var onPlaybackError: (title: String?, reason: String, skipped: Boolean) -> Unit = { _, _, _ -> }
+
+    private var lastAudioErrorId: String? = null
+
     private var controller: MediaController? = null
+    private var pendingVideoView: TextureView? = null
     private var ticker: Job? = null
     private var extras: Bundle = Bundle.EMPTY
     private val transitionListeners = mutableListOf<() -> Unit>()
@@ -80,14 +111,125 @@ class PlayerConnection(private val context: Context, private val appScope: Corou
                 .buildAsync()
                 .await()
             controller = c
+            pendingVideoView?.let { c.setVideoTextureView(it) }
             c.addListener(object : Player.Listener {
                 override fun onEvents(player: Player, events: Player.Events) = publish()
+                override fun onVideoSizeChanged(videoSize: VideoSize) { _videoSize.value = videoSize }
+                override fun onRenderedFirstFrame() { _firstFrame.value = true; android.util.Log.i("KairosVideo", "UI: first frame") }
+                override fun onPlayerError(error: PlaybackException) {
+                    val cur = c.current()
+                    val reason = humanError(error)
+                    if (isVideoItem(cur)) {
+                        android.util.Log.w("KairosVideo", "video failed: ${error.errorCodeName}: $reason", error)
+                        onVideoError(reason)
+                    } else {
+                        val id = cur?.mediaId
+                        val online = (id?.toLongOrNull() ?: 0L) < 0
+                        val permanent = reason in setOf(
+                            "Age-restricted on YouTube", "Not available in your region",
+                            "This video is private", "Paid content cannot be streamed",
+                            "Unavailable on YouTube", "No playable audio stream",
+                        )
+                        // Skip notifying on the first transient online retry unless it's permanent or local.
+                        if (!online || permanent || lastAudioErrorId == id || !c.hasNextMediaItem()) {
+                            val title = cur?.mediaMetadata?.title?.toString()
+                            onPlaybackError(title, reason, online && c.hasNextMediaItem())
+                        }
+                        lastAudioErrorId = id
+                    }
+                }
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (isPlaying) lastAudioErrorId = null
+                }
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) transitionListeners.toList().forEach { it() }
                 }
             })
             publish()
         }
+    }
+
+    /**
+     * The playing item. While a stream swap (sound <-> video) is being set up, [MediaController.getCurrentMediaItem]
+     * can be null although the queue and the index are intact (items=6 index=1 in the log). Reading
+     * the item at the index instead keeps the song from "disappearing" for that time, which made the
+     * ViewModel drop the video request and, after its grace period, close the player.
+     */
+    private fun MediaController.current(): MediaItem? =
+        currentMediaItem ?: if (currentMediaItemIndex in 0 until mediaItemCount) getMediaItemAt(currentMediaItemIndex) else null
+
+    private fun isVideoItem(item: MediaItem?) = item?.requestMetadata?.mediaUri?.scheme == VIDEO_SCHEME
+
+    private fun humanError(error: PlaybackException): String {
+        val known = listOf(
+            "Age-restricted on YouTube",
+            "Not available in your region",
+            "This video is private",
+            "Paid content cannot be streamed",
+            "Unavailable on YouTube",
+            "Too many requests — try again shortly",
+            "No playable video stream",
+            "No playable audio stream",
+            "No internet connection",
+            "Connection timed out",
+        )
+        for (t in generateSequence<Throwable>(error) { it.cause }) {
+            val msg = t.message.orEmpty()
+            known.firstOrNull { it in msg }?.let { return it }
+            if (t is java.net.UnknownHostException || t is java.net.ConnectException) return "No internet connection"
+            if (t is java.net.SocketTimeoutException) return "Connection timed out"
+        }
+        return when (error.errorCode) {
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED -> "No internet connection"
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "Connection timed out"
+            PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "Stream unavailable"
+            PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND -> "File not found"
+            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FAILED -> "Format not supported on this device"
+            else -> "Playback error"
+        }
+    }
+
+    /** Draws the video into [view]. Call [detachVideo] when the view goes away. */
+    fun attachVideo(view: TextureView) {
+        android.util.Log.i("KairosVideo", "UI: attach texture (controller=${controller != null}, available=${view.isAvailable}, attached=${view.isAttachedToWindow})")
+        pendingVideoView = view
+        controller?.setVideoTextureView(view)
+    }
+
+    fun detachVideo(view: TextureView) {
+        if (pendingVideoView === view) pendingVideoView = null
+        controller?.clearVideoTextureView(view)
+    }
+
+    /**
+     * Plays the current song from [uri] instead (its sound only, or with its picture), from the
+     * same second. Same media id, so favourites, stats and the queue don't notice.
+     *
+     * The item is built fresh, without the Uri the service resolved for the old one: with it, the
+     * service would keep playing the old stream.
+     */
+    fun swapStream(uri: Uri) {
+        val c = controller ?: return
+        val item = c.current() ?: return
+        // Already playing from this Uri (a repeated request): swapping again would only restart the stream.
+        if (item.requestMetadata.mediaUri == uri) return
+        val index = c.currentMediaItemIndex
+        val position = c.currentPosition
+        _firstFrame.value = false
+        val swapped = MediaItem.Builder()
+            .setMediaId(item.mediaId)
+            .setMediaMetadata(item.mediaMetadata)
+            // replaceMediaItem() does not pass through MediaSession.Callback.onAddMediaItems().
+            // Therefore the service cannot resolve requestMetadata.mediaUri into a playback URI
+            // for this replacement. Set BOTH: localConfiguration.uri drives MediaSource creation,
+            // while requestMetadata.mediaUri preserves Kairos' logical stream identity.
+            .setUri(uri)
+            .setRequestMetadata(MediaItem.RequestMetadata.Builder().setMediaUri(uri).build())
+            .build()
+        c.replaceMediaItem(index, swapped)
+        c.seekTo(index, position) // replacing the playing item restarts it
+        if (c.playbackState == Player.STATE_IDLE) c.prepare()
     }
 
     /** Called when a song ends and the next one starts on its own (used by the sleep timer). */
@@ -261,12 +403,20 @@ class PlayerConnection(private val context: Context, private val appScope: Corou
         }
         if (order.size != c.mediaItemCount) { order.clear(); order.addAll(0 until c.mediaItemCount) }
         val next = NowPlaying(
-            songId = c.currentMediaItem?.mediaId?.toLongOrNull(),
+            songId = c.current()?.mediaId?.toLongOrNull(),
             isPlaying = c.isPlaying,
             durationMs = c.duration.takeIf { it > 0 } ?: 0,
             queueIndex = c.currentMediaItemIndex,
             queueSize = c.mediaItemCount,
-            queue = order.map { i -> QueueEntry(i, c.getMediaItemAt(i).mediaId.toLongOrNull() ?: -1L) },
+            queue = order.map { i ->
+                val item = c.getMediaItemAt(i)
+                QueueEntry(
+                    index = i,
+                    songId = item.mediaId.toLongOrNull() ?: -1L,
+                    title = item.mediaMetadata.title?.toString().orEmpty(),
+                    artist = item.mediaMetadata.artist?.toString().orEmpty(),
+                )
+            },
             queuePosition = order.indexOf(c.currentMediaItemIndex).coerceAtLeast(0),
             shuffle = c.shuffleModeEnabled,
             repeatMode = c.repeatMode,
@@ -277,7 +427,11 @@ class PlayerConnection(private val context: Context, private val appScope: Corou
             shownPosition = if (_filling.value) fillStart - fillInsertedBefore + order.indexOf(c.currentMediaItemIndex).coerceAtLeast(0)
             else order.indexOf(c.currentMediaItemIndex).coerceAtLeast(0),
             shownSize = if (_filling.value) fillTotal else c.mediaItemCount,
+            videoActive = isVideoItem(c.current()),
         )
+        if (next.songId == null && _state.value.songId != null) {
+            android.util.Log.w("KairosNow", "no current song: items=${c.mediaItemCount} index=${c.currentMediaItemIndex} state=${c.playbackState} err=${c.playerError?.errorCodeName}")
+        }
         if (next != _state.value) _state.value = next
         // Position only changes on its own while playing, so only tick then.
         if (c.isPlaying && ticker?.isActive != true) {

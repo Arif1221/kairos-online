@@ -165,13 +165,25 @@ fun SearchScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenCollection: (Strin
                         if (onlineName != null) "Songs, artists, albums, playlists" else "Songs, artists, albums, genres",
                         container = chip, height = 52.dp,
                     )
-                    // Online build: one row of filters instead of a switch between two searches.
+                    // Online build: separate Online (Audio/Video/etc.) from Offline (On this phone) clearly.
                     if (onlineName != null && q.isNotEmpty()) {
-                        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            com.skarif.kairos.online.OnlineKind.entries.forEach { k ->
-                                Pill(k.label, { vm.onlineUi.setSearchOnline(true); vm.onlineUi.setKind(k) }, selected = searchOnline && onlineKind == k)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Pill("Online · $onlineName", { vm.onlineUi.setSearchOnline(true) }, selected = searchOnline)
+                                Pill("Offline · On this phone", { vm.onlineUi.setSearchOnline(false) }, selected = !searchOnline, icon = Ic.Music)
                             }
-                            Pill("On this phone", { vm.onlineUi.setSearchOnline(false) }, selected = !searchOnline, icon = Ic.Music)
+                            if (searchOnline) {
+                                Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    com.skarif.kairos.online.OnlineKind.entries.forEach { k ->
+                                        val label = when (k) {
+                                            com.skarif.kairos.online.OnlineKind.SONGS -> "Audio (Songs)"
+                                            com.skarif.kairos.online.OnlineKind.VIDEOS -> "Video"
+                                            else -> k.label
+                                        }
+                                        Pill(label, { vm.onlineUi.setKind(k) }, selected = onlineKind == k)
+                                    }
+                                }
+                            }
                         }
                     }
                     if (q.isEmpty() && onlineName != null) {
