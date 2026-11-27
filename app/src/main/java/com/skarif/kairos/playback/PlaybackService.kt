@@ -34,6 +34,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlin.math.pow
 
@@ -110,6 +111,11 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        // The buttons can't reach a stopped service: point them at the app until it plays again.
+        runCatching {
+            val p = getSharedPreferences("widget", MODE_PRIVATE)
+            com.skarif.kairos.widget.KairosWidget.push(this, p.getString("title", null), p.getString("artist", null), null, playing = false, live = false)
+        }
         recordListening()
         effects.release()
         BitPerfect.clear(this)
@@ -162,6 +168,28 @@ class PlaybackService : MediaSessionService() {
     /** Online songs skipped in a row because they failed to load; stops a dead network racing through the queue. */
     private var onlineSkips = 0
 
+    private var widgetJob: kotlinx.coroutines.Job? = null
+
+    /** Keeps the home-screen widget in step: song, cover and play/pause. Nothing to do without a widget. */
+    private fun updateWidget() {
+        if (!com.skarif.kairos.widget.KairosWidget.active(this)) return
+        val p = session?.player ?: return
+        val item = p.currentMediaItem
+        val id = item?.mediaId?.toLongOrNull()
+        val playing = p.isPlaying
+        widgetJob?.cancel()
+        widgetJob = scope.launch {
+            val song = id?.let { container.db.songs().observe(it).first() }
+            val cover = song?.let { container.artwork.load(it, 360) }
+            com.skarif.kairos.widget.KairosWidget.push(
+                this@PlaybackService,
+                song?.title ?: item?.mediaMetadata?.title?.toString(),
+                song?.artist ?: item?.mediaMetadata?.artist?.toString(),
+                cover, playing,
+            )
+        }
+    }
+
     private val playerListener = object : Player.Listener {
         // An online song that fails to load (removed video, YouTube change, no network) is skipped
         // rather than stopping playback, up to 3 in a row.
@@ -177,6 +205,7 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            updateWidget()
             recordListening()
             currentSongId = mediaItem?.mediaId?.toLongOrNull()
             songStartedAt = System.currentTimeMillis()
@@ -186,6 +215,7 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            updateWidget()
             val now = System.currentTimeMillis()
             if (isPlaying) {
                 onlineSkips = 0 // something is playing again

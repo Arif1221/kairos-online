@@ -151,6 +151,7 @@ fun CircleButton(
     iconSize: Dp = 20.dp,
 ) {
     val interaction = remember { MutableInteractionSource() }
+    val view = androidx.compose.ui.platform.LocalView.current
     val bg by animateColorAsState(container, tween(250), label = "circleBg")
     val fg by animateColorAsState(content, tween(250), label = "circleFg")
     Box(
@@ -159,13 +160,18 @@ fun CircleButton(
             .pressScale(interaction)
             .clip(CircleShape)
             .background(bg)
-            .clickable(interactionSource = interaction, indication = ripple(), role = Role.Button, onClick = onClick),
+            .clickable(interactionSource = interaction, indication = ripple(), role = Role.Button) { view.tick(); onClick() },
         contentAlignment = Alignment.Center,
     ) {
         Crossfade(icon, animationSpec = tween(180), label = "icon") { ic ->
             Icon(ic, contentDescription, tint = fg, modifier = Modifier.size(iconSize))
         }
     }
+}
+
+/** A light tick under the finger, so a tap feels answered (it follows the phone's touch-feedback setting). */
+fun android.view.View.tick() {
+    performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
 }
 
 @Composable
@@ -190,6 +196,7 @@ fun Pill(
         else -> c.text
     }
     val interaction = remember { MutableInteractionSource() }
+    val view = androidx.compose.ui.platform.LocalView.current
     val bgA by animateColorAsState(bg, tween(250), label = "pillBg")
     val fgA by animateColorAsState(fg, tween(250), label = "pillFg")
     Row(
@@ -198,7 +205,7 @@ fun Pill(
             .pressScale(interaction, 0.96f)
             .clip(RoundedCornerShape(50))
             .background(bgA)
-            .clickable(interactionSource = interaction, indication = ripple(), role = Role.Button, onClick = onClick)
+            .clickable(interactionSource = interaction, indication = ripple(), role = Role.Button) { view.tick(); onClick() }
             .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),

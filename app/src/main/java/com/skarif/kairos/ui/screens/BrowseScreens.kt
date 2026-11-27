@@ -330,7 +330,7 @@ fun CoverTile(vm: MainViewModel, song: SongEntity, key: String, kicker: String, 
 }
 
 @Composable
-fun PlaylistsScreen(vm: MainViewModel, onBack: () -> Unit, onNew: () -> Unit, onOpenCollection: (String) -> Unit) {
+fun PlaylistsScreen(vm: MainViewModel, onBack: () -> Unit, onNew: () -> Unit, onOpenCollection: (String) -> Unit, onImport: () -> Unit = {}) {
     val menu = LocalCollectionMenu.current
     val c = P.colors
     val playlists by vm.playlists.collectAsStateWithLifecycle()
@@ -370,6 +370,7 @@ fun PlaylistsScreen(vm: MainViewModel, onBack: () -> Unit, onNew: () -> Unit, on
                         Pill("Import", { importM3u.launch(arrayOf("audio/x-mpegurl", "audio/mpegurl", "application/vnd.apple.mpegurl", "application/x-mpegurl", "text/plain", "*/*")) }, icon = Ic.Down)
                         Box(Modifier.size(8.dp))
                         Pill("New", onNew, icon = Ic.Plus)
+                        if (vm.onlineName != null) { Box(Modifier.size(8.dp)); Pill("Spotify", onImport, icon = Ic.DownArrow) }
                     }
                     Text(mixedHeadline("Your " to false, "playlists" to true, ", made " to false, "your way" to true), Modifier.stretchTitle { band.pull }, style = T.h1, color = c.text)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -448,7 +449,20 @@ fun NewPlaylistScreen(vm: MainViewModel, onDone: () -> Unit, initialSongs: List<
         if (t.isEmpty()) songs.take(300) else songs.filter { it.title.lowercase().contains(t) || it.artist.lowercase().contains(t) }.take(300)
     }
     val songMap by vm.songMap.collectAsStateWithLifecycle()
-    val pickedSongs = picked.mapNotNull { songMap[it] }
+    // Online build: songs from YouTube Music too, searched as you type (after a short pause).
+    var online by remember { mutableStateOf<List<com.skarif.kairos.data.db.SongEntity>>(emptyList()) }
+    var onlineLoading by remember { mutableStateOf(false) }
+    val onlineSeen = remember { androidx.compose.runtime.mutableStateMapOf<Long, com.skarif.kairos.data.db.SongEntity>() }
+    if (vm.onlineName != null) androidx.compose.runtime.LaunchedEffect(find) {
+        online = emptyList()
+        if (find.isBlank()) return@LaunchedEffect
+        kotlinx.coroutines.delay(450)
+        onlineLoading = true
+        online = vm.onlineUi.searchSongs(find).filter { o -> songs.none { it.id == o.id } }
+        online.forEach { onlineSeen[it.id] = it }
+        onlineLoading = false
+    }
+    val pickedSongs = picked.mapNotNull { songMap[it] ?: onlineSeen[it] }
 
     ScreenBackground {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 12.dp + LocalBottomClearance.current), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -462,10 +476,32 @@ fun NewPlaylistScreen(vm: MainViewModel, onDone: () -> Unit, initialSongs: List<
             }
             SearchField(find, { find = it }, "Find songs to add")
             LazyColumn(Modifier.weight(1f).clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card)).background(c.card.copy(alpha = 0.7f))) {
-                items(shown, key = { it.id }, contentType = { "pick" }) { s ->
-                    val on = s.id in picked
+                items(shown, key = { it.id }, contentType = { "pick" }) { s -> PickRow(vm, s, s.id in picked) { if (s.id in picked) picked.remove(s.id) else picked.add(s.id) } }
+                if (vm.onlineName != null && find.isNotBlank()) {
+                    item(key = "online-h") {
+                        Text(
+                            if (onlineLoading) "Searching ${vm.onlineName}…" else if (online.isEmpty()) "Nothing on ${vm.onlineName}" else "From ${vm.onlineName}",
+                            Modifier.padding(start = 14.dp, top = 14.dp, bottom = 4.dp), style = T.title, color = c.muted,
+                        )
+                    }
+                    items(online, key = { "o" + it.id }, contentType = { "pick" }) { s -> PickRow(vm, s, s.id in picked) { if (s.id in picked) picked.remove(s.id) else picked.add(s.id) } }
+                }
+            }
+            Pill(
+                if (picked.isEmpty()) "Pick some songs" else "Create with ${picked.size} songs",
+                { if (picked.isNotEmpty()) { vm.createPlaylist(name, picked.toList()); onDone() } },
+                accent = true, big = true, modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/** One song in the new-playlist picker, with a tick box. */
+@Composable
+private fun PickRow(vm: MainViewModel, s: com.skarif.kairos.data.db.SongEntity, on: Boolean, onToggle: () -> Unit) {
+    val c = P.colors
                     Row(
-                        Modifier.fillMaxWidth().clickable(role = Role.Checkbox) { if (on) picked.remove(s.id) else picked.add(s.id) }
+                        Modifier.fillMaxWidth().clickable(role = Role.Checkbox, onClick = onToggle)
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
@@ -476,15 +512,6 @@ fun NewPlaylistScreen(vm: MainViewModel, onDone: () -> Unit, initialSongs: List<
                         }
                         Checkbox(on, null, colors = CheckboxDefaults.colors(checkedColor = c.accent, checkmarkColor = c.onAccent, uncheckedColor = c.muted))
                     }
-                }
-            }
-            Pill(
-                if (picked.isEmpty()) "Pick some songs" else "Create with ${picked.size} songs",
-                { if (picked.isNotEmpty()) { vm.createPlaylist(name, picked.toList()); onDone() } },
-                accent = true, big = true, modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
 }
 
 @Composable

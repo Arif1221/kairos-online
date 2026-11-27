@@ -13,8 +13,8 @@ android {
         minSdk = 28 // DynamicsProcessing (10-band EQ) needs Android 9
         targetSdk = 37
         // Online: main's version + a 4th online number; versionCode = main's * 10 + that number.
-        versionCode = 295
-        versionName = "0.9.1.5"
+        versionCode = 297
+        versionName = "0.9.1.7"
     }
 
     // Release signing comes from the environment (GitHub secrets in CI), never from the repo.
@@ -99,6 +99,8 @@ dependencies {
     implementation(libs.palette.ktx)
 
     testImplementation(libs.junit)
+    // Android's org.json is a stub in unit tests; the real one lets the Spotify parser be tested.
+    testImplementation("org.json:json:20240303")
 
     coreLibraryDesugaring(libs.desugar.jdk.libs.nio)
 

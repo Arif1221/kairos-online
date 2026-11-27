@@ -60,19 +60,45 @@ class ArtworkRepository(private val context: Context) {
         bitmaps.get(key) ?: runCatching { loadRemote(url, sizePx) }.getOrNull()?.also { bitmaps.put(key, it) }
     }
 
-    /** Downloads a cover (online songs) and crops it to a centred square, like local album art. */
+    /**
+     * Downloads a cover (online songs) and crops it to a centred square, like local album art.
+     * Video thumbnails are asked for at their largest first (1280×720): the default ones are
+     * 480×360 with black bars, which looked soft and dark on the full-screen player.
+     */
     private fun loadRemote(url: String, sizePx: Int): Bitmap? {
+        for (candidate in candidates(url)) {
+            val bmp = runCatching { fetch(candidate) }.getOrNull() ?: continue
+            return squareCrop(bmp, sizePx)
+        }
+        return null
+    }
+
+    private fun candidates(url: String): List<String> {
+        // YouTube Music art: ask for a bigger square than older rows stored.
+        if ("googleusercontent.com" in url) return listOf(url.replace(Regex("=w\\d+-h\\d+"), "=w1080-h1080"), url)
+        val id = Regex("""i\.ytimg\.com/vi(?:_webp)?/([\w-]{6,})/""").find(url)?.groupValues?.get(1) ?: return listOf(url)
+        return listOf("https://i.ytimg.com/vi/$id/maxresdefault.jpg", "https://i.ytimg.com/vi/$id/hq720.jpg", url)
+    }
+
+    private fun fetch(url: String): Bitmap? {
         val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-        val bytes = try {
+        return try {
             conn.connectTimeout = 10_000
             conn.readTimeout = 10_000
-            conn.inputStream.use { it.readBytes() }
+            if (conn.responseCode !in 200..299) return null // maxres doesn't exist for every video
+            val bytes = conn.inputStream.use { it.readBytes() }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
         } finally {
             conn.disconnect()
         }
-        val src = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
-        val side = minOf(src.width, src.height)
-        val square = Bitmap.createBitmap(src, (src.width - side) / 2, (src.height - side) / 2, side, side)
+    }
+
+    private fun squareCrop(src: Bitmap, sizePx: Int): Bitmap {
+        // 4:3 thumbnails hold a 16:9 picture between black bars: keep only the picture.
+        val h = if (src.width * 3 == src.height * 4) src.width * 9 / 16 else src.height
+        val top = (src.height - h) / 2
+        val side = minOf(src.width, h)
+        val square = Bitmap.createBitmap(src, (src.width - side) / 2, top + (h - side) / 2, side, side)
         return if (side > sizePx) Bitmap.createScaledBitmap(square, sizePx, sizePx, true) else square
     }
 

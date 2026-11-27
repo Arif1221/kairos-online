@@ -120,6 +120,12 @@ fun Modifier.backdrop(alpha: () -> Float = { 1f }): Modifier {
         // Light dots on dark, grey on light: the old grey dots read as noise on a dark page.
         val tile = dotTile(step, 1.1.dp.toPx(), c.dots)
         val dots = ShaderBrush(ImageShader(tile, TileMode.Repeated, TileMode.Repeated))
+        // Dark themes: a little more colour from the cover, which the dark wash otherwise greys out.
+        val vivid = if (c.dark) androidx.compose.ui.graphics.ColorFilter.colorMatrix(
+            androidx.compose.ui.graphics.ColorMatrix().apply { setToSaturation(1.35f) },
+        ) else null
+        // Pure black is the theme with the darkest wash; it gets a little less of it than before.
+        val pure = c.bg == Color.Black
         onDrawBehind {
             val a = alpha().coerceIn(0f, 1f)
             if (a <= 0f) return@onDrawBehind
@@ -128,12 +134,24 @@ fun Modifier.backdrop(alpha: () -> Float = { 1f }): Modifier {
             if (state.enabled && (cur != null || state.previous != null)) {
                 val f = state.fade.value
                 val t = state.phase
-                state.previous?.let { drawCover(it, a * (1f - f), t) }
-                cur?.let { drawCover(it, a * f, t) }
+                state.previous?.let { drawCover(it, a * (1f - f), t, vivid) }
+                cur?.let { drawCover(it, a * f, t, vivid) }
                 // The theme's wash, at about two thirds strength: full strength (62% white in the
                 // light theme) all but hid pale covers.
                 // Dark themes keep more of the wash: weak, it let bright covers fight with the text.
-                drawRect(c.veil, alpha = a * (if (c.dark) 0.9f else 0.68f))
+                // Dark: a lighter wash in the middle of the page, where the cover shows between cards,
+                // and fuller at the top and bottom, where the header and the dock sit.
+                if (c.dark) {
+                    val mid = if (pure) 0.78f else 0.62f
+                    drawRect(
+                        androidx.compose.ui.graphics.Brush.verticalGradient(
+                            0f to c.veil.copy(alpha = c.veil.alpha * 0.95f),
+                            0.45f to c.veil.copy(alpha = c.veil.alpha * mid),
+                            1f to c.veil.copy(alpha = c.veil.alpha * 0.92f),
+                        ),
+                        alpha = a,
+                    )
+                } else drawRect(c.veil, alpha = a * 0.68f)
             }
             drawRect(dots, alpha = a)
         }
@@ -141,7 +159,7 @@ fun Modifier.backdrop(alpha: () -> Float = { 1f }): Modifier {
 }
 
 /** The tiny cover stretched to fill, cropped to keep its square shape (like ContentScale.Crop, zoomed 1.2×). */
-private fun DrawScope.drawCover(img: ImageBitmap, alpha: Float, t: Float = 0f) {
+private fun DrawScope.drawCover(img: ImageBitmap, alpha: Float, t: Float = 0f, filter: androidx.compose.ui.graphics.ColorFilter? = null) {
     if (alpha <= 0f) return
     // Living motion, big enough to see through the blur and the wash: a slow wander (two
     // unrelated periods, so it never visibly loops), a turn of a few degrees, and a breath in size.
@@ -158,7 +176,7 @@ private fun DrawScope.drawCover(img: ImageBitmap, alpha: Float, t: Float = 0f) {
     // painted over the page underneath while this one slid away (the "blur card" on back swipe).
     clipRect {
         rotate(angle, pivot = center + androidx.compose.ui.geometry.Offset(dx, dy)) {
-            drawImage(img, dstOffset = off, dstSize = dst, alpha = alpha, filterQuality = FilterQuality.Low)
+            drawImage(img, dstOffset = off, dstSize = dst, alpha = alpha, colorFilter = filter, filterQuality = FilterQuality.Low)
         }
     }
 }

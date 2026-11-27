@@ -1,5 +1,24 @@
 # Changelog
 
+## Online 0.9.1.7
+- Import from Spotify: paste a public playlist or album link (no login); songs are matched on this phone first, then on YouTube Music
+- Library's Songs and Artists include songs downloaded in the app, alongside the files on this phone
+- Download buttons in the queue too
+- New playlist: the song search finds YouTube Music songs too, under your own
+- Fix: saving the queue as a playlist left out online songs
+
+## Online 0.9.1.6
+- Home-screen widget: the song's cover blurred behind it, with play, previous and next
+- See all on every Home shelf; Refresh moved to the top of Home
+- Download buttons on Quick picks and on song cards
+- Sharper covers on the player (YouTube thumbnails at their largest, without black bars)
+- Artist pages load faster and never hang: they show what they found, or a Try again
+- Smaller side menu, with a Light / Dark / Auto switch
+- Save the queue as a playlist from a button on the queue screen
+- A light tap feel on buttons, and a short message for play next, favourites and new playlists
+- Living background: more of the cover's colour in dark and pure-black themes
+- Songs saved to the phone now show up in Library a few seconds later
+
 ## Online 0.9.1.5
 - Like artists, albums and playlists; find them under Library > Artists and Albums
 - Liked artists lead Home's "Your artists"

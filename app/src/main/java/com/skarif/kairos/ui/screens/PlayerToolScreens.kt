@@ -126,6 +126,9 @@ fun QueuePane(vm: MainViewModel, onBack: () -> Unit, onSaveAsPlaylist: () -> Uni
                     Text("Queue", style = T.h2, color = c.text)
                     Text("${now.shownPosition + 1} of ${now.shownSize}, ${(now.shownSize - now.shownPosition - 1).coerceAtLeast(0)} up next", style = T.small, color = c.muted)
                 }
+                // Visible, not only in the menu: the most wanted queue action.
+                CircleButton(Ic.PlaylistAdd, "Save queue as playlist", onSaveAsPlaylist, size = 48.dp)
+                Spacer(Modifier.size(8.dp))
                 Box {
                     CircleButton(Ic.Menu, "Queue options", { overflow = true }, size = 48.dp)
                     androidx.compose.material3.DropdownMenu(
@@ -260,6 +263,9 @@ fun QueuePane(vm: MainViewModel, onBack: () -> Unit, onSaveAsPlaylist: () -> Uni
                                         Text(song?.artist ?: "", style = T.small, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                     Text(formatTime(song?.durationMs ?: 0), style = T.num, color = c.muted)
+                                    if (song != null && song.volume == com.skarif.kairos.data.db.ONLINE_VOLUME && vm.onlineName != null) {
+                                        DownloadButton(vm, song, 34.dp)
+                                    }
                                     if (!now.shuffle) Icon(
                                         Ic.Menu, "Drag to reorder", tint = c.muted,
                                         modifier = Modifier.size(28.dp).pointerInput(e.index, pos) {
@@ -499,6 +505,7 @@ fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> U
     val items = listOfNotNull(
         Triple("Home", "home", Ic.Home),
         vm.onlineName?.let { Triple("Downloads", "downloads", Ic.DownArrow) },
+        vm.onlineName?.let { Triple("Import from Spotify", "online/spotify", Ic.PlaylistAdd) },
         Triple("Library", "library", Ic.Library), Triple("Playlists", "playlists", Ic.Queue),
         Triple("Search", "search", Ic.Search), Triple("Statistics", "stats", Ic.Stats), Triple("Queue", "queue", Ic.Queue),
         Triple("Equalizer", "eq", Ic.Sliders), Triple(if (sleep.active) "Sleep timer (on)" else "Sleep timer", "sleep", Ic.Clock),
@@ -509,10 +516,22 @@ fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> U
         Column(
             Modifier.fillMaxSize().padding(end = 70.dp).clip(RoundedCornerShape(topEnd = 38.dp, bottomEnd = 38.dp)).background(c.sheet)
                 .verticalScroll(rememberScrollState(), flingBehavior = com.skarif.kairos.ui.motion.rememberIosFling()).statusBarsPadding().navigationBarsPadding().padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            CircleButton(Ic.Close, "Close menu", onClose, container = c.ink, content = c.inkFg)
-            Text(mixedHeadline("Your " to false, "music" to true), style = T.h1.copy(fontSize = 32.sp), color = c.text)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CircleButton(Ic.Close, "Close menu", onClose, size = 44.dp, container = c.ink, content = c.inkFg)
+                Text(mixedHeadline("Your " to false, "music" to true), style = T.h1.copy(fontSize = 26.sp), color = c.text)
+            }
+            // Theme, one tap away.
+            val settings by vm.settings.collectAsStateWithLifecycle()
+            com.skarif.kairos.ui.components.Segmented(
+                listOf("Light", "Dark", "Auto"),
+                when (settings.themeMode) { com.skarif.kairos.data.ThemeMode.LIGHT -> 0; com.skarif.kairos.data.ThemeMode.DARK -> 1; else -> 2 },
+                { i ->
+                    val mode = listOf(com.skarif.kairos.data.ThemeMode.LIGHT, com.skarif.kairos.data.ThemeMode.DARK, com.skarif.kairos.data.ThemeMode.SYSTEM)[i]
+                    vm.updateSettings { it.copy(themeMode = mode) }
+                },
+            )
             if (cur != null) {
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)).background(c.accent)
@@ -527,16 +546,19 @@ fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> U
                     CircleButton(if (now.isPlaying) Ic.Pause else Ic.Play, if (now.isPlaying) "Pause" else "Play", vm::toggle, size = 44.dp, container = c.ink, content = c.inkFg)
                 }
             }
-            items.forEach { (label, route, icon) ->
-                Row(
-                    Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
-                        .selectable(false, role = Role.Button) { onNavigate(route) },
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Box(Modifier.size(44.dp).clip(RoundedCornerShape(22.dp)).background(c.tint), contentAlignment = Alignment.Center) {
-                        androidx.compose.material3.Icon(icon, null, tint = c.text, modifier = Modifier.size(20.dp))
+            // Compact rows: the whole menu fits on one screen on most phones.
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                items.forEach { (label, route, icon) ->
+                    Row(
+                        Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+                            .selectable(false, role = Role.Button) { onNavigate(route) }.padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Box(Modifier.size(34.dp).clip(RoundedCornerShape(17.dp)).background(c.tint), contentAlignment = Alignment.Center) {
+                            androidx.compose.material3.Icon(icon, null, tint = c.text, modifier = Modifier.size(17.dp))
+                        }
+                        Text(label, style = T.title.copy(fontSize = 16.sp), color = c.text)
                     }
-                    Text(label, style = T.title.copy(fontSize = 18.sp), color = c.text)
                 }
             }
             Box(Modifier.width(1.dp).height(8.dp))

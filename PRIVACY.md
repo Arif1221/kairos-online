@@ -16,6 +16,7 @@ To stream, the app connects directly from your phone to:
 
 - **YouTube** (youtube.com, googlevideo.com, ytimg.com, googleusercontent.com): search, stream addresses, audio and cover images. YouTube receives your IP address and what you search for and play, as with any YouTube client. Google's privacy policy applies to that traffic.
 - **LRCLIB** (lrclib.net): the title, artist and length of a song, to find its lyrics.
+- **Spotify** (open.spotify.com): only when you import a playlist, its public page, to read the song list. No account, nothing about you.
 - **GitHub** (api.github.com): once per launch, to check for a newer Kairos Online release. Nothing about you is sent.
 
 To build Explore (Quick picks and Your artists), the app searches YouTube for the titles and artists of the few songs you play most, including songs on your phone. Nothing else about your music library (files, folders, playlists, history) is sent anywhere.

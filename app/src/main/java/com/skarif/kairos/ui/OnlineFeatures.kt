@@ -46,6 +46,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -381,6 +382,99 @@ class OnlineFeatures(
         notify(if (had) "Removed ${collection.title} from your albums" else "Added ${collection.title} to your albums")
     }
 
+    // ---- Spotify import -------------------------------------------------------------------------
+
+    sealed interface ImportState {
+        data object Idle : ImportState
+        data object Reading : ImportState
+        data class Matching(val name: String, val done: Int, val total: Int, val found: Int) : ImportState
+        data class Done(
+            val name: String, val playlistId: Long, val found: Int, val total: Int,
+            val missing: List<com.skarif.kairos.online.SpotifyImport.Track>, val maybeCut: Boolean,
+        ) : ImportState
+        data class Failed(val message: String) : ImportState
+    }
+
+    private val _import = MutableStateFlow<ImportState>(ImportState.Idle)
+    val import: StateFlow<ImportState> = _import.asStateFlow()
+    private var importJob: Job? = null
+
+    fun resetImport() { importJob?.cancel(); _import.value = ImportState.Idle }
+
+    /**
+     * A public Spotify playlist or album → a Kairos playlist: each song is looked for on this
+     * phone first (same title and artist), then on YouTube Music. Four at a time.
+     */
+    fun importSpotify(link: String) {
+        val s = source ?: return
+        val target = com.skarif.kairos.online.SpotifyImport.parseLink(link)
+        if (target == null) { _import.value = ImportState.Failed("That isn't a Spotify playlist or album link."); return }
+        if (!networkUp.value) { _import.value = ImportState.Failed(offlineMessage()); return }
+        importJob?.cancel()
+        importJob = scope.launch {
+            _import.value = ImportState.Reading
+            try {
+                val list = withContext(Dispatchers.IO) {
+                    val conn = URL(com.skarif.kairos.online.SpotifyImport.embedUrl(target.first, target.second)).openConnection() as HttpURLConnection
+                    val html = try {
+                        conn.connectTimeout = 15_000
+                        conn.readTimeout = 20_000
+                        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Mobile Safari/537.36")
+                        if (conn.responseCode == 404) error("Spotify can't find it. Is the playlist public?")
+                        conn.inputStream.use { it.readBytes().decodeToString() }
+                    } finally {
+                        conn.disconnect()
+                    }
+                    com.skarif.kairos.online.SpotifyImport.parse(html)
+                }
+                if (list.tracks.isEmpty()) error("That playlist is empty, or private.")
+                // Songs on this phone, by matching key, for the first pass.
+                val local = ct.db.songs().observeAll().first().filterNot { it.isOnline }
+                    .groupBy { com.skarif.kairos.online.SpotifyImport.key(it.title) }
+                val found = arrayOfNulls<SongEntity>(list.tracks.size)
+                var done = 0
+                var hits = 0
+                val gate = kotlinx.coroutines.sync.Semaphore(4)
+                coroutineScope {
+                    list.tracks.forEachIndexed { i, t ->
+                        launch {
+                            gate.acquire()
+                            try {
+                                val artist = com.skarif.kairos.online.SpotifyImport.firstArtist(t.artist).lowercase()
+                                val mine = local[com.skarif.kairos.online.SpotifyImport.key(t.title)]
+                                    ?.firstOrNull { artist.isEmpty() || artist in it.artist.lowercase() }
+                                found[i] = mine ?: runCatching {
+                                    // "(feat. …)" and "[From …]" make the search worse, not better.
+                                    val plain = t.title.replace(Regex("""\s*[(\[][^)\]]*[)\]]"""), "").trim().ifEmpty { t.title }
+                                    withTimeoutOrNull(20_000) { s.findSong(plain, com.skarif.kairos.online.SpotifyImport.firstArtist(t.artist)) }
+                                }.getOrNull()
+                            } finally {
+                                gate.release()
+                                done++
+                                if (found[i] != null) hits++
+                                _import.value = ImportState.Matching(list.name, done, list.tracks.size, hits)
+                            }
+                        }
+                    }
+                }
+                val songs = found.filterNotNull().distinctBy { it.id }
+                ct.db.songs().upsertAll(songs.filter { it.isOnline })
+                seen(songs)
+                val id = ct.db.playlists().create(list.name, songs.map { it.id })
+                _import.value = ImportState.Done(
+                    list.name, id, songs.size, list.tracks.size,
+                    list.tracks.filterIndexed { i, _ -> found[i] == null }, list.maybeCut,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _import.value = ImportState.Failed(
+                    e.message?.takeIf { it.isNotBlank() && e is IllegalStateException } ?: failMessage(e),
+                )
+            }
+        }
+    }
+
     // ---- Search ----------------------------------------------------------------------------
 
     private val query = MutableStateFlow("")
@@ -420,6 +514,15 @@ class OnlineFeatures(
                 OnlineResults(q, k, error = failMessage(e))
             }
         }
+    }
+
+    /** Online songs for [q], for pickers (new playlist). Empty when offline or on failure; never throws. */
+    suspend fun searchSongs(q: String): List<SongEntity> {
+        val s = source ?: return emptyList()
+        if (q.isBlank() || !networkUp.value) return emptyList()
+        return try {
+            s.search(q.trim(), OnlineKind.SONGS).items.filterIsInstance<OnlineItem.Track>().map { it.song }.also(seen)
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { emptyList() }
     }
 
     /** Next page of the current results; call when the list nears its end. */

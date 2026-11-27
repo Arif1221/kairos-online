@@ -113,7 +113,7 @@ fun SongRow(
     if (swipe) {
         val fav = favourite ?: (song.id in vm.favorites.collectAsStateWithLifecycle().value)
         SwipeActions(
-            "Play next", Ic.Queue, { vm.playNext(listOf(song)); vm.notify("${song.title} plays next") },
+            "Play next", Ic.Queue, { vm.playNext(listOf(song)) },
             if (fav) "Unfavourite" else "Favourite", if (fav) Ic.Heart else Ic.HeartFilled, { vm.toggleFavorite(song.id) },
         ) { SongRowContent(song, playing, vm, number, onLongClick, onClick) }
     } else {
@@ -212,7 +212,7 @@ fun SongActionsDialog(
         if (!shuffleOn) SheetAction("Play next", Ic.Queue) { vm.moveToNext(queueIndex) } else null,
         favAction, shareAction,
     ) else listOfNotNull(
-        SheetAction("Play next", Ic.Queue) { vm.playNext(listOf(song)); vm.notify("Plays next") },
+        SheetAction("Play next", Ic.Queue) { vm.playNext(listOf(song)) },
         SheetAction("Add to queue", Ic.AddQueue) { vm.addToQueue(listOf(song)) },
         favAction, downloadAction ?: shareAction,
     )
@@ -569,7 +569,7 @@ fun CollectionActionsSheet(
                 SheetAction("Play", Ic.Play) { vm.play(songs, 0, col.title) },
                 SheetAction("Shuffle", Ic.Shuffle) { vm.shuffle(songs, from = col.title) },
                 SheetAction("Play next", Ic.Queue) {
-                    vm.playNext(songs); vm.notify(if (songs.size == 1) "Plays next" else "${songs.size} songs play next")
+                    vm.playNext(songs)
                 },
                 SheetAction("Add to queue", Ic.AddQueue) { vm.addToQueue(songs) },
             )

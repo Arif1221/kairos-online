@@ -13,6 +13,8 @@ import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheWriter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.coroutineScope
 import com.skarif.kairos.data.StreamQuality
 import com.skarif.kairos.data.db.ONLINE_VOLUME
@@ -189,37 +191,57 @@ internal object YouTubeMusic : OnlineMusic {
         ).also { collections.put(id, it) }
     }
 
+    private val artists = Lru<OnlineArtist>(20, 30 * 60_000L)
+
+    /** Runs a blocking NewPipe call with a deadline, so one slow request can't hold a page forever. */
+    private suspend fun <T> within(ms: Long, block: () -> T): T? =
+        withTimeoutOrNull(ms) { runCatching { runInterruptible(Dispatchers.IO) { block() } }.getOrNull() }
+
     override suspend fun artist(id: String, name: String): OnlineArtist = withContext(Dispatchers.IO) {
+        artists.get("$id|$name")?.let { return@withContext it }
         init
         val yt = ServiceList.YouTube
-        val info = runCatching { retry { ChannelInfo.getInfo(yt, id) } }.getOrNull()
-        val tabs = info?.tabs.orEmpty()
-        fun tab(f: String) = tabs.firstOrNull { f in it.contentFilters }
-            ?.let { runCatching { ChannelTabInfo.getInfo(yt, it).relatedItems }.getOrNull() }.orEmpty()
-        val songs = (tab(ChannelTabs.TRACKS).ifEmpty { tab(ChannelTabs.VIDEOS) })
-            .filterIsInstance<StreamInfoItem>().filterNot { it.isShortFormContent }
-            .mapNotNull { it.toSong(tidy = true) }
-            .toMutableList()
-        val releases = (tab(ChannelTabs.ALBUMS) + tab(ChannelTabs.PLAYLISTS))
-            .filterIsInstance<PlaylistInfoItem>().map { it.toCollection() }.distinctBy { it.id }.toMutableList()
-        val artistName = info?.name?.removeSuffix(" - Topic")?.takeIf { it.isNotBlank() } ?: name
-        // Channel pages often come back empty; their songs and albums are still a search away.
-        if (songs.size < 5) {
-            val hits = runCatching { search(artistName, OnlineKind.SONGS).items }.getOrDefault(emptyList())
-                .filterIsInstance<OnlineItem.Track>().map { it.song }
-            val theirs = hits.filter { artistName.lowercase() in it.artist.lowercase() }
-            songs += (theirs.ifEmpty { hits }).filter { s -> songs.none { it.fileName == s.fileName } }
+        coroutineScope {
+            // The channel page and the search fallback start together: whichever is useful is ready
+            // sooner, and nothing waits more than ~12 s. (Before, each step waited in turn, up to
+            // minutes on a slow network, and the page sat on "loading".)
+            val byName = async { runCatching { search(name, OnlineKind.SONGS).items }.getOrDefault(emptyList()) }
+            val listsByName = async { runCatching { search(name, OnlineKind.PLAYLISTS).items }.getOrDefault(emptyList()) }
+            val info = if (id.isBlank()) null else within(12_000) { ChannelInfo.getInfo(yt, id) }
+            val tabs = info?.tabs.orEmpty()
+            fun tab(f: String) = async {
+                tabs.firstOrNull { f in it.contentFilters }?.let { within(10_000) { ChannelTabInfo.getInfo(yt, it).relatedItems } }.orEmpty()
+            }
+            val tracks = tab(ChannelTabs.TRACKS)
+            val videos = tab(ChannelTabs.VIDEOS)
+            val albums = tab(ChannelTabs.ALBUMS)
+            val lists = tab(ChannelTabs.PLAYLISTS)
+            val songs = tracks.await().ifEmpty { videos.await() }
+                .filterIsInstance<StreamInfoItem>().filterNot { it.isShortFormContent }
+                .mapNotNull { it.toSong(tidy = true) }
+                .toMutableList()
+            val releases = (albums.await() + lists.await())
+                .filterIsInstance<PlaylistInfoItem>().map { it.toCollection() }.distinctBy { it.id }.toMutableList()
+            val artistName = info?.name?.removeSuffix(" - Topic")?.takeIf { it.isNotBlank() } ?: name
+            // Channel pages often come back empty; their songs and albums are still a search away.
+            if (songs.size < 5) {
+                val hits = (withTimeoutOrNull(12_000) { byName.await() } ?: emptyList())
+                    .filterIsInstance<OnlineItem.Track>().map { it.song }
+                val theirs = hits.filter { artistName.lowercase() in it.artist.lowercase() }
+                songs += (theirs.ifEmpty { hits }).filter { s -> songs.none { it.fileName == s.fileName } }
+            } else byName.cancel()
+            if (releases.isEmpty()) {
+                releases += (withTimeoutOrNull(12_000) { listsByName.await() } ?: emptyList())
+                    .filterIsInstance<OnlineItem.Collection>().take(12)
+            } else listsByName.cancel()
+            if (songs.isEmpty() && releases.isEmpty()) throw IOException("Nothing found for $name")
+            OnlineArtist(
+                name = artistName,
+                art = info?.avatars?.let { art(it, square = true) } ?: songs.firstOrNull()?.artUrl,
+                songs = songs.take(50),
+                collections = releases,
+            ).also { artists.put("$id|$name", it) }
         }
-        if (releases.isEmpty()) {
-            releases += runCatching { search(artistName, OnlineKind.PLAYLISTS).items }.getOrDefault(emptyList())
-                .filterIsInstance<OnlineItem.Collection>().take(12)
-        }
-        OnlineArtist(
-            name = artistName,
-            art = info?.avatars?.let { art(it, square = true) },
-            songs = songs.take(50),
-            collections = releases,
-        )
     }
 
     override suspend fun radio(song: SongEntity): List<SongEntity> = withContext(Dispatchers.IO) {
@@ -485,7 +507,7 @@ internal object YouTubeMusic : OnlineMusic {
 
     /** YouTube Music art URLs end in a size like "=w60-h60-l90-rj"; ask for a large square instead. */
     private fun squareArt(url: String): String =
-        if ("googleusercontent.com" in url) url.replace(Regex("=w\\d+-h\\d+.*$"), "=w544-h544-l90-rj") else url
+        if ("googleusercontent.com" in url) url.replace(Regex("=w\\d+-h\\d+.*$"), "=w1080-h1080-l90-rj") else url
 
     internal fun idFor(videoId: String): Long = onlineId(videoId)
 }

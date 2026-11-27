@@ -312,6 +312,7 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                     if (vm.onlineName != null) com.skarif.kairos.ui.screens.ExploreScreen(
                         vm, onMenu = openMenu, onOpenNowPlaying = openPlayer, onDownloads = { nav.navigate("downloads") },
                         onOpenCollection = ::openCollection, onSearch = { nav.tab("search") },
+                        onShelf = { k -> nav.navigate("online/shelf/" + Uri.encode(k)) },
                     ) else HomeScreen(
                         vm, onMenu = openMenu, onSearch = { nav.tab("search") }, onOpenCollection = ::openCollection,
                         onOpenNowPlaying = openPlayer, onPlaylists = { nav.navigate("playlists") },
@@ -329,6 +330,12 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                 screen("search") {
                     SearchScreen(vm, onMenu = openMenu, onOpenCollection = ::openCollection, onOpenNowPlaying = openPlayer)
                 }
+                screen("online/shelf/{key}") { e ->
+                    com.skarif.kairos.ui.screens.ShelfScreen(vm, Uri.decode(e.arguments?.getString("key") ?: ""), onBack = { nav.popBackStack() }, onOpenNowPlaying = openPlayer)
+                }
+                screen("online/spotify") {
+                    com.skarif.kairos.ui.screens.SpotifyImportScreen(vm, onBack = { nav.popBackStack() }, onOpenPlaylist = { id -> openCollection("playlist:$id") })
+                }
                 screen("online/liked/{kind}") { e ->
                     com.skarif.kairos.ui.screens.LikedOnlineScreen(vm, artists = e.arguments?.getString("kind") == "artists", onBack = { nav.popBackStack() })
                 }
@@ -343,11 +350,11 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                     com.skarif.kairos.ui.screens.OnlineArtistScreen(vm, id, name, onBack = { nav.popBackStack() }, onOpenNowPlaying = openPlayer)
                 }
                 screen("playlists") {
-                    PlaylistsScreen(vm, onBack = { nav.popBackStack() }, onNew = { nav.navigate("newplaylist?fromQueue=false") }, onOpenCollection = ::openCollection)
+                    PlaylistsScreen(vm, onBack = { nav.popBackStack() }, onNew = { nav.navigate("newplaylist?fromQueue=false") }, onOpenCollection = ::openCollection, onImport = { nav.navigate("online/spotify") })
                 }
                 screen("newplaylist?fromQueue={fromQueue}") { e ->
                     val fromQueue = e.arguments?.getString("fromQueue") == "true"
-                    val initial = remember { if (fromQueue) vm.now.value.queue.map { it.songId }.filter { it >= 0 } else emptyList() }
+                    val initial = remember { if (fromQueue) vm.now.value.queue.map { it.songId } /* online songs have negative ids and belong in it too */ else emptyList() }
                     NewPlaylistScreen(vm, onDone = { nav.popBackStack() }, initialSongs = initial)
                 }
                 screen("collection/{key}") { e ->

@@ -70,6 +70,7 @@ import com.skarif.kairos.ui.ShelfStyle
 import com.skarif.kairos.ui.components.CircleButton
 import com.skarif.kairos.ui.components.CompactTitleBar
 import com.skarif.kairos.ui.components.Ic
+import com.skarif.kairos.ui.components.cardClick
 import com.skarif.kairos.ui.components.KairosDialog
 import com.skarif.kairos.ui.components.Pill
 import com.skarif.kairos.ui.components.PillMeter
@@ -150,7 +151,12 @@ private fun OnlineCard(vm: MainViewModel, item: OnlineItem, onLongClick: (() -> 
         horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        ItemArt(vm, item, 150.dp, corner = 20.dp)
+        Box {
+            ItemArt(vm, item, 150.dp, corner = 20.dp)
+            if (item is OnlineItem.Track) Box(Modifier.align(Alignment.BottomEnd).padding(6.dp)) {
+                DownloadButton(vm, item.song, 34.dp, container = c.card.copy(alpha = 0.92f), content = c.text)
+            }
+        }
         Text(
             item.title(), Modifier.padding(horizontal = 4.dp), style = T.title.copy(fontSize = 15.sp), color = c.text,
             maxLines = if (round) 1 else 2, overflow = TextOverflow.Ellipsis, textAlign = if (round) TextAlign.Center else TextAlign.Start,
@@ -205,6 +211,16 @@ private fun SkeletonShelf() {
     }
 }
 
+/** A shelf's title, with "See all" on the right when the shelf has a page of its own. */
+@Composable
+private fun ShelfHeader(title: String, subtitle: String?, onSeeAll: (() -> Unit)?, extra: (@Composable () -> Unit)? = null) {
+    Row(Modifier.fillMaxWidth().padding(end = 18.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.weight(1f)) { ShelfTitle(title, subtitle) }
+        extra?.invoke()
+        onSeeAll?.let { Pill("See all", it, icon = Ic.Next) }
+    }
+}
+
 @Composable
 private fun ShelfTitle(title: String, subtitle: String?) {
     Column(Modifier.padding(horizontal = 18.dp)) {
@@ -218,15 +234,12 @@ private fun ShelfTitle(title: String, subtitle: String?) {
  * Tapping one plays the picks from there.
  */
 @Composable
-private fun PicksShelf(vm: MainViewModel, shelf: Shelf, nowId: Long?, onSong: (SongEntity) -> Unit, onPlay: (List<SongEntity>, Int) -> Unit) {
+private fun PicksShelf(vm: MainViewModel, shelf: Shelf, nowId: Long?, onSong: (SongEntity) -> Unit, onSeeAll: () -> Unit, onPlay: (List<SongEntity>, Int) -> Unit) {
     val songs = remember(shelf) { shelf.items.filterIsInstance<OnlineItem.Track>().map { it.song } }
     val columns = remember(songs) { songs.chunked(4) }
     val c = P.colors
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth().padding(end = 18.dp), verticalAlignment = Alignment.Bottom) {
-            Box(Modifier.weight(1f)) { ShelfTitle(shelf.title, shelf.subtitle) }
-            Pill("Play all", { onPlay(songs, 0) }, icon = Ic.Play)
-        }
+        ShelfHeader(shelf.title, shelf.subtitle, onSeeAll) { Pill("Play", { onPlay(songs, 0) }, icon = Ic.Play) }
         LazyRow(contentPadding = PaddingValues(horizontal = 6.dp)) {
             itemsIndexed(columns, key = { i, _ -> "pc$i" }) { col, group ->
                 Column(Modifier.width(310.dp)) {
@@ -247,6 +260,7 @@ private fun PicksShelf(vm: MainViewModel, shelf: Shelf, nowId: Long?, onSong: (S
                                 Text(s.title, style = T.title.copy(fontSize = 15.sp), color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(s.artist, style = T.small, color = if (s.id == nowId) fg.copy(alpha = 0.8f) else c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
+                            DownloadButton(vm, s, 36.dp, content = if (s.id == nowId) c.onAccent else c.muted)
                         }
                     }
                 }
@@ -263,9 +277,12 @@ private fun Modifier.combinedClickableCompat(interaction: MutableInteractionSour
     )
 
 @Composable
-private fun CardShelf(vm: MainViewModel, title: String, subtitle: String?, items: List<OnlineItem>, onSong: (SongEntity) -> Unit, onOpen: (OnlineItem) -> Unit) {
+private fun CardShelf(
+    vm: MainViewModel, title: String, subtitle: String?, items: List<OnlineItem>,
+    onSong: (SongEntity) -> Unit, onSeeAll: (() -> Unit)? = null, onOpen: (OnlineItem) -> Unit,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        ShelfTitle(title, subtitle)
+        ShelfHeader(title, subtitle, onSeeAll)
         LazyRow(contentPadding = PaddingValues(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(items, key = { it.key }) { item ->
                 OnlineCard(vm, item, onLongClick = (item as? OnlineItem.Track)?.let { t -> { onSong(t.song) } }) { onOpen(item) }
@@ -284,6 +301,7 @@ fun ExploreScreen(
     onDownloads: () -> Unit,
     onOpenCollection: (String) -> Unit,
     onSearch: () -> Unit,
+    onShelf: (String) -> Unit = {},
 ) {
     val o = vm.onlineUi
     val c = P.colors
@@ -323,7 +341,12 @@ fun ExploreScreen(
                 TabHeader(
                     "Home",
                     left = { chip -> CircleButton(Ic.Menu, "Menu", onMenu, container = chip, content = c.text) },
-                    right = { chip -> CircleButton(Ic.Search, "Search", onSearch, container = chip, content = c.text) },
+                    right = { chip ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            CircleButton(Ic.Refresh, "Refresh Home", { o.loadExplore(force = true); vm.notify("Refreshing Home") }, container = chip, content = c.text)
+                            CircleButton(Ic.Search, "Search", onSearch, container = chip, content = c.text)
+                        }
+                    },
                     pull = { band.pull },
                 ) {
                     val part = remember { when (java.time.LocalTime.now().hour) { in 5..11 -> "morning"; in 12..16 -> "afternoon"; in 17..21 -> "evening"; else -> "night" } }
@@ -370,7 +393,7 @@ fun ExploreScreen(
             fun yours() {
                 val lastPlayed = mixes.firstOrNull { it.key == "lastplayed" }?.songs.orEmpty().take(20)
                 if (lastPlayed.isNotEmpty()) item(key = "recent") {
-                    CardShelf(vm, "Jump back in", null, lastPlayed.map(OnlineItem::Track), { actionsFor = it }) { item ->
+                    CardShelf(vm, "Jump back in", null, lastPlayed.map(OnlineItem::Track), { actionsFor = it }, { onOpenCollection("lastplayed") }) { item ->
                         (item as? OnlineItem.Track)?.let { t -> play(lastPlayed, lastPlayed.indexOf(t.song), "Recently played") }
                     }
                 }
@@ -378,7 +401,7 @@ fun ExploreScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(Modifier.fillMaxWidth().padding(end = 18.dp), verticalAlignment = Alignment.Bottom) {
                             Box(Modifier.weight(1f)) { ShelfTitle("Your downloads", "${downloads.size} songs · play offline") }
-                            Pill("See all", onDownloads)
+                            Pill("See all", onDownloads, icon = Ic.Next)
                         }
                         LazyRow(contentPadding = PaddingValues(horizontal = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             itemsIndexed(downloads.take(20), key = { _, s -> "dl${s.id}" }) { i, s ->
@@ -405,7 +428,7 @@ fun ExploreScreen(
                 when (val m = mood) {
                     is Loadable.Ready -> {
                         if (m.value.playlists.isNotEmpty()) item(key = "mood-lists") {
-                            CardShelf(vm, "${m.value.label} playlists", null, m.value.playlists, { }, openItem)
+                            CardShelf(vm, "${m.value.label} playlists", null, m.value.playlists, { }, onOpen = openItem)
                         }
                         if (m.value.songs.isNotEmpty()) {
                             item(key = "mood-songs-h") {
@@ -434,17 +457,12 @@ fun ExploreScreen(
                         st.shelves.forEachIndexed { i, shelf ->
                             item(key = "shelf:${shelf.key}") {
                                 when (shelf.style) {
-                                    ShelfStyle.PICKS -> PicksShelf(vm, shelf, now.songId, { actionsFor = it }) { songs, at -> play(songs, at, shelf.title) }
-                                    else -> CardShelf(vm, shelf.title, shelf.subtitle, shelf.items, { actionsFor = it }, openItem)
+                                    ShelfStyle.PICKS -> PicksShelf(vm, shelf, now.songId, { actionsFor = it }, { onShelf(shelf.key) }) { songs, at -> play(songs, at, shelf.title) }
+                                    else -> CardShelf(vm, shelf.title, shelf.subtitle, shelf.items, { actionsFor = it }, { onShelf(shelf.key) }, openItem)
                                 }
                             }
                             // Your own music sits right after Quick picks.
                             if (i == 0) yours()
-                        }
-                        item(key = "refresh") {
-                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                Pill("Refresh", { o.loadExplore(force = true) }, icon = Ic.Refresh)
-                            }
                         }
                     }
                 }
@@ -610,7 +628,6 @@ fun OnlineCollectionScreen(vm: MainViewModel, id: String, onBack: () -> Unit, on
                 }, selected = isLiked, icon = if (isLiked) Ic.HeartFilled else Ic.Heart)
                 Pill("Copy to playlists", {
                     vm.createPlaylist(col.title, col.songs.map { it.id })
-                    vm.notify("Copied to your playlists")
                 }, icon = Ic.PlaylistAdd)
             }
         }
@@ -900,6 +917,139 @@ fun LikedOnlineScreen(vm: MainViewModel, artists: Boolean, onBack: () -> Unit) {
                         is OnlineItem.Artist -> nav.artist(if (item.id.startsWith("_:")) "_" else item.id, item.name)
                         is OnlineItem.Collection -> nav.collection(item.id)
                         else -> {}
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** "See all" for a Home shelf: everything in it as a list. */
+@Composable
+fun ShelfScreen(vm: MainViewModel, key: String, onBack: () -> Unit, onOpenNowPlaying: () -> Unit) {
+    val c = P.colors
+    val nav = LocalOnlineNav.current
+    val state by vm.onlineUi.explore.collectAsStateWithLifecycle()
+    val now by vm.now.collectAsStateWithLifecycle()
+    val favs by vm.favorites.collectAsStateWithLifecycle()
+    var actionsFor by remember { mutableStateOf<SongEntity?>(null) }
+    val shelf = (state as? ExploreState.Ready)?.shelves?.firstOrNull { it.key == key }
+    val songs = shelf?.items?.filterIsInstance<OnlineItem.Track>()?.map { it.song }.orEmpty()
+    ScreenBackground {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            flingBehavior = com.skarif.kairos.ui.motion.rememberIosFling(),
+            contentPadding = PaddingValues(bottom = 40.dp + navBarBottom() + LocalBottomClearance.current),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            item(key = "head") {
+                Column(Modifier.statusBarsPadding().padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    CircleButton(Ic.Back, "Back", onBack)
+                    shelf?.subtitle?.let { Text(it.uppercase(), style = T.small.copy(fontSize = 11.sp, letterSpacing = 1.sp), color = c.muted) }
+                    Text(shelf?.title ?: "Not available", style = T.h1, color = c.text)
+                    if (songs.size > 1) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Pill("Play", { vm.play(songs, 0, shelf?.title); onOpenNowPlaying() }, selected = true, icon = Ic.Play)
+                        Pill("Shuffle", { vm.shuffle(songs, smart = false, from = shelf?.title); onOpenNowPlaying() }, icon = Ic.Shuffle)
+                        Pill("Download all", { vm.onlineUi.download(songs) }, icon = Ic.DownArrow)
+                    }
+                    if (shelf == null) Text("Go back to Home and let it load first.", style = T.body, color = c.muted)
+                }
+            }
+            shelf?.let { sh ->
+                items(sh.items, key = { it.key }) { item ->
+                    when (item) {
+                        is OnlineItem.Track -> SongRow(item.song, item.song.id == now.songId, vm, favourite = item.song.id in favs, onLongClick = { actionsFor = item.song }) {
+                            vm.play(songs, songs.indexOf(item.song), sh.title); onOpenNowPlaying()
+                        }
+                        else -> OnlinePageRow(vm, item) { open(vm, item, onOpenNowPlaying, nav) }
+                    }
+                }
+            }
+        }
+    }
+    actionsFor?.let { s -> SongActionsDialog(vm, s, onOpenAlbum = {}) { actionsFor = null } }
+}
+
+/** Paste a public Spotify playlist or album link; Kairos rebuilds it as one of your playlists. */
+@Composable
+fun SpotifyImportScreen(vm: MainViewModel, onBack: () -> Unit, onOpenPlaylist: (Long) -> Unit) {
+    val c = P.colors
+    val o = vm.onlineUi
+    val state by o.import.collectAsStateWithLifecycle()
+    var link by remember { mutableStateOf("") }
+    val nav = LocalOnlineNav.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    ScreenBackground {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            flingBehavior = com.skarif.kairos.ui.motion.rememberIosFling(),
+            contentPadding = PaddingValues(bottom = 40.dp + navBarBottom() + LocalBottomClearance.current),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item(key = "head") {
+                Column(Modifier.statusBarsPadding().padding(start = 18.dp, end = 18.dp, top = 12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    CircleButton(Ic.Back, "Back", onBack)
+                    Text(mixedHeadline("Import from " to false, "Spotify" to true), style = T.h1, color = c.text)
+                    Text(
+                        "Paste the link of a public playlist or album (Share › Copy link in Spotify). No Spotify login. " +
+                            "Each song is looked for on this phone first, then on ${vm.onlineName ?: "YouTube Music"}.",
+                        style = T.body, color = c.muted,
+                    )
+                    SearchField(link, { link = it }, "https://open.spotify.com/playlist/…", height = 52.dp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Pill("Paste", { clipboard.getText()?.text?.let { link = it.trim() } }, icon = Ic.PlaylistAdd)
+                        val busy = state is com.skarif.kairos.ui.OnlineFeatures.ImportState.Reading || state is com.skarif.kairos.ui.OnlineFeatures.ImportState.Matching
+                        Pill(if (busy) "Stop" else "Import", { if (busy) o.resetImport() else o.importSpotify(link) }, selected = true, icon = if (busy) Ic.Close else Ic.DownArrow)
+                    }
+                }
+            }
+            item(key = "state") {
+                Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    when (val st = state) {
+                        com.skarif.kairos.ui.OnlineFeatures.ImportState.Idle -> Text(
+                            "Spotify shares the first 100 songs of a playlist this way. Bigger ones come in cut short.",
+                            style = T.small, color = c.muted,
+                        )
+                        com.skarif.kairos.ui.OnlineFeatures.ImportState.Reading -> Text("Reading the playlist from Spotify…", style = T.body, color = c.text)
+                        is com.skarif.kairos.ui.OnlineFeatures.ImportState.Matching -> {
+                            Text(st.name, style = T.h2, color = c.text)
+                            Text("Finding songs: ${st.done} of ${st.total} · ${st.found} found", style = T.body, color = c.muted)
+                            com.skarif.kairos.ui.components.PillMeter((st.done * 20 / st.total.coerceAtLeast(1)), 20, c.accent, height = 10.dp)
+                        }
+                        is com.skarif.kairos.ui.OnlineFeatures.ImportState.Done -> {
+                            Text(st.name, style = T.h2, color = c.text)
+                            Text(
+                                "Made a playlist with ${st.found} of ${st.total} songs." +
+                                    if (st.maybeCut) " Spotify only shared the first 100." else "",
+                                style = T.body, color = c.muted,
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Pill("Open playlist", { onOpenPlaylist(st.playlistId) }, selected = true, icon = Ic.Play)
+                                Pill("Import another", { link = ""; o.resetImport() })
+                            }
+                            if (st.missing.isNotEmpty()) {
+                                Text("Not found (${st.missing.size})", style = T.title, color = c.text)
+                                Text("Search for these yourself and add them with Add to playlist.", style = T.small, color = c.muted)
+                            }
+                        }
+                        is com.skarif.kairos.ui.OnlineFeatures.ImportState.Failed -> Text(st.message, style = T.body, color = c.accent)
+                    }
+                }
+            }
+            (state as? com.skarif.kairos.ui.OnlineFeatures.ImportState.Done)?.missing?.let { missing ->
+                items(missing.size, key = { "m$it" }) { i ->
+                    val t = missing[i]
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 18.dp).clip(RoundedCornerShape(16.dp)).background(c.card)
+                            .cardClick("Search ${t.title}") { nav.search("${t.title} ${com.skarif.kairos.online.SpotifyImport.firstArtist(t.artist)}", OnlineKind.SONGS) }
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(t.title, style = T.title, color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(t.artist, style = T.small, color = c.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Icon(Ic.Search, null, tint = c.muted, modifier = Modifier.size(18.dp))
                     }
                 }
             }

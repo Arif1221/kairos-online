@@ -1,0 +1,4 @@
+• Home-screen widget with blurred cover
+• See all on Home shelves; Refresh at the top
+• Sharper covers; faster artist pages
+• Smaller menu with theme switch; Save queue button

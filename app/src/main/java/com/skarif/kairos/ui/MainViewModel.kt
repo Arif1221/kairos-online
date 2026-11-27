@@ -136,8 +136,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Every song row: the library plus online songs that were played, saved or added (online flavor). */
     private val allSongs: StateFlow<List<SongEntity>> = ct.db.songs().observeAll().always(emptyList())
     /** Your library: local files only. Albums, artists, mixes and search are built from this. */
-    val songs: StateFlow<List<SongEntity>> = allSongs.map { l -> if (Flavor.online == null) l else l.filterNot { it.isOnline } }
-        .flowOn(Dispatchers.Default).always(emptyList())
+    /** Ids of online songs downloaded in the app (fed from [onlineUi] once it exists). */
+    private val downloadedOnline = MutableStateFlow<Set<Long>>(emptySet())
+
+    /**
+     * Your library: files on this phone, plus (online build) songs downloaded in the app, so
+     * Songs, Artists and Search show both. Streamed-only songs stay out.
+     */
+    val songs: StateFlow<List<SongEntity>> = combine(allSongs, downloadedOnline) { l, dl ->
+        if (Flavor.online == null) l else l.filter { !it.isOnline || it.id in dl }
+    }.flowOn(Dispatchers.Default).always(emptyList())
     private val events: StateFlow<List<PlayEventEntity>> = ct.db.playEvents().observeAll().state(emptyList())
     val favorites: StateFlow<Set<Long>> = ct.db.favorites().observeIds().map { it.toSet() }.always(emptySet())
 
@@ -155,7 +163,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         .flowOn(Dispatchers.Default).state(emptyMap())
 
     /** Albums merged across MediaStore ids; see [groupAlbums]. */
-    val albums: StateFlow<List<AlbumGroup>> = songs.map { groupAlbums(it) }.flowOn(Dispatchers.Default).always(emptyList())
+    // Downloaded online songs have no real album (id 0): they'd all land in one fake album.
+    val albums: StateFlow<List<AlbumGroup>> = songs.map { l -> groupAlbums(l.filterNot { it.isOnline }) }.flowOn(Dispatchers.Default).always(emptyList())
     private val albumIndex: StateFlow<Map<Long, AlbumGroup>> = albums.map { l ->
         HashMap<Long, AlbumGroup>().apply { l.forEach { g -> g.albumIds.forEach { put(it, g) } } }
     }.always(emptyMap())
@@ -708,7 +717,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Explore, online search, network state and the stream cache; inert in the play build. */
     val onlineUi = OnlineFeatures(app, ct, viewModelScope, seen = { l -> l.forEach { seenOnline[it.id] = it } },
         notify = { notify(it) },
-        onSavedToPhone = { if (com.skarif.kairos.ui.screens.hasAudioPermission(app)) scanNow() },
+        onSavedToPhone = {
+            // Android reads a new file's length a moment after it's written; scanning at once found
+            // it with no duration, the short-clip filter dropped it, and it never showed in Library.
+            if (com.skarif.kairos.ui.screens.hasAudioPermission(app)) viewModelScope.launch {
+                kotlinx.coroutines.delay(2_500); scanNow()
+                kotlinx.coroutines.delay(8_000); scanNow()
+            }
+        },
     )
 
     /** Online songs only exist in Room once kept; do that before they are played or referenced. */
@@ -874,7 +890,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissNotice(id: Long) { if (_notice.value?.id == id) _notice.value = null }
 
     private suspend fun toast(text: String) = kotlinx.coroutines.withContext(Dispatchers.Main) { notify(text) }
-    fun playNext(list: List<SongEntity>) { keepOnline(list); ct.player.playNext(list) }
+    fun playNext(list: List<SongEntity>) {
+        if (list.isEmpty()) return
+        keepOnline(list)
+        ct.player.playNext(list)
+        notify(if (list.size == 1) "${list[0].title} plays next" else "${list.size} songs play next")
+    }
     suspend fun firstPlayedAt(songId: Long): Long? = ct.db.playEvents().firstPlayedAt(songId)
     /** Adds to the end of the queue. */
     fun addToQueue(list: List<SongEntity>) {
@@ -923,12 +944,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } else {
                 keepOnlineIds(listOf(songId))
                 ct.db.favorites().add(FavoriteEntity(songId, System.currentTimeMillis()))
+                notify("Added to favourites")
             }
         }
     }
 
     fun createPlaylist(name: String, songIds: List<Long>) {
-        viewModelScope.launch { keepOnlineIds(songIds); ct.db.playlists().create(name.ifBlank { "New playlist" }, songIds) }
+        viewModelScope.launch {
+            keepOnlineIds(songIds)
+            val title = name.ifBlank { "New playlist" }
+            ct.db.playlists().create(title, songIds)
+            notify("Created \"$title\" with ${songIds.size} songs")
+        }
     }
 
     fun addToPlaylistNamed(playlistId: Long, songIds: List<Long>) {
@@ -1084,6 +1111,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // Kept last: Kotlin runs initialisers in file order, and these collectors start
     // immediately, so every field they touch must already exist.
     init {
+        viewModelScope.launch { onlineUi.downloadedIds.collect { downloadedOnline.value = it } }
         ct.player.connect()
         // Long queues finish loading only once the player isn't animating.
         ct.player.busy = { com.skarif.kairos.ui.motion.PlayerMotion.animating }
