@@ -302,10 +302,9 @@ fun NowPlayingPane(
                     if (sleep.active) InfoChip(Ic.Clock, "Sleep timer on", onSleep)
                     if (kotlin.math.abs(now.speed - 1f) > 0.01f) InfoChip(Ic.Wave, speedLabel(now.speed)) { speedDialog = true }
                 }
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    LiveWaveformSeek(vm, now.durationMs.takeIf { it > 0 } ?: s.durationMs, s.id)
-                    TimeRow(vm, now.durationMs.takeIf { it > 0 } ?: s.durationMs)
-                }
+                // WaveformSeek already renders elapsed and remaining time below the bars.
+                // Keep a single timestamp row to avoid the duplicated labels in the player.
+                LiveWaveformSeek(vm, now.durationMs.takeIf { it > 0 } ?: s.durationMs, s.id)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     CircleButton(Ic.Prev, "Previous song", vm::previous, size = 64.dp, iconSize = 22.dp)
                     val playPress = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }

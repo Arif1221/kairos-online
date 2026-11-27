@@ -166,8 +166,9 @@ fun HomeScreen(
             }
 
             // Quick picks: only the ones that have songs, so a new install isn't a wall of "0 songs".
-            val picks = listOf("favourites", "most", "onrepeat", "recent", "lastplayed", "never")
-                .mapNotNull { byKey[it] }.filter { it.songs.isNotEmpty() }.take(6)
+            // Recent and last-played already have dedicated sections below; don't repeat them here.
+            val picks = listOf("favourites", "most", "onrepeat", "never")
+                .mapNotNull { byKey[it] }.filter { it.songs.isNotEmpty() }.take(4)
             if (picks.isNotEmpty()) {
                 Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     picks.chunked(2).forEach { row ->
