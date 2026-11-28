@@ -2,13 +2,16 @@
 
 ## Unreleased
 
+## Online 0.9.3.3
+- Look: richer light-mode seek bars. The daytime sky carries more of the album cover's colour at the top and horizon, blends less into the page, and has slightly more saturated waves with a deeper played-part glow and line. Dark mode and the Home card are unchanged.
+
 ## Online 0.9.3.2
 - Look: dark-mode buttons. Round buttons, pills and the Segmented track sit one step above the card (they used to melt into it), the selected pill, the dock's active button and the player's big buttons use a soft stone instead of near-white glare, and the equalizer and sleep timer buttons follow the theme
 - Look: dark mode matches the light one across the app. The living background brings a bright cover down to a deep, rich tone (no neon) the way light mode lifts a dark one to a pastel, the cover colour boost and the colour glows are gentler, the veil a little heavier, and the dark greys carry the same slight warmth as the light theme
 - Look: dark-mode seek bars match the light ones: a dark, muted tint of the cover's colour blended into the dark surface, softer waves and a soft light line on the played part (no more saturated dark blocks)
 - Playlists: the playlist menu has Sort by (title, artist, album, newest, oldest, reverse, shuffle order), Duplicate playlist and Remove duplicate songs (shown when there are any). Sorting and removing duplicates can be undone
 - Backup: playlist covers you set are saved in the backup and come back on restore. Backups are now version 2 (older backups still restore; a backup from a newer Kairos is refused with a clear message instead of half-restoring)
-- Look: seek bars follow the theme. Light mode gets a daytime sky (pale at the horizon, a soft tint above, deeper waves and a deeper line on the played part); dark mode keeps the night sky
+- Look: seek bars follow the theme. Light mode gets a daytime sky (a clear tint of the cover's colour, paler at the horizon, deeper waves and a deeper line on the played part); dark mode keeps the night sky
 - Look: the seek bar scenes are lighter and quieter. The sky is a soft tint of the cover's colour (less saturated, less dark) blended towards the page colour, so the bar sits in the app instead of being a dark coloured block
 - Fix: build error on newer Compose (`BlurEffect.radiusX` is private); the glass blur tracks its own radius
 - Look: calmer colours. Seek bar scenes (aurora bands, the planet and its ring, wave layers) now stay close to the cover's colour instead of fanning out into a rainbow. The album colour favours the most vivid family over a larger dull one, and the second background glow only appears when that hue really shows on the cover

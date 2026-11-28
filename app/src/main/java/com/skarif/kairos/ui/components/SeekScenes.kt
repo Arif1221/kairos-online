@@ -143,21 +143,24 @@ fun scenePalette(accent: Color, lift: Float = 0f, blend: Color = Color.Unspecifi
     if (day) {
         // Light theme: a daytime sky, pale at the horizon and a soft tint above it, with the waves a
         // little deeper so they still read against it. White clouds, petals and stars stay visible high up.
-        deep = hsv(h, if (neutral) s else s * 0.34f, 0.74f)
-        mid = hsv(h, if (neutral) s else s * 0.16f, 0.95f)
-        if (blend != Color.Unspecified) { deep = lerp(deep, blend, 0.15f); mid = lerp(mid, blend, 0.30f) }
+        // A richer daytime sky: keep the cover hue more present at both the top and horizon.
+        // Neutral artwork remains neutral rather than gaining an artificial colour cast.
+        deep = hsv(h, if (neutral) s else (s * 0.92f).coerceAtMost(1f), 0.68f)
+        mid = hsv(h, if (neutral) s else (s * 0.68f).coerceAtMost(1f), 0.93f)
+        // Keep the page tint subtle; too much blending washed the daytime sky towards the surface.
+        if (blend != Color.Unspecified) { deep = lerp(deep, blend, 0.04f); mid = lerp(mid, blend, 0.08f) }
     }
     return ScenePalette(
         deep = deep,
         mid = mid,
-        base = when { day -> hsv(h, s, 0.78f); appNight -> hsv(h, s * 0.85f, 0.88f); else -> hsv(h, s, 0.92f) },
-        glow = if (day) hsv(h, s * 0.80f, 0.92f) else hsv(h, s * 0.55f, 1f),
+        base = when { day -> hsv(h, (s * 1.12f).coerceAtMost(1f), 0.72f); appNight -> hsv(h, s * 0.85f, 0.88f); else -> hsv(h, s, 0.92f) },
+        glow = if (day) hsv(h, (s * 0.95f).coerceAtMost(1f), 0.84f) else hsv(h, s * 0.55f, 1f),
         hi = lerp(hsv(h, s * 0.30f, 1f), Color.White, 0.45f),
         // Close to the accent on the colour wheel and a touch softer: the bands read as shades of the
         // cover's colour, not a rainbow (they used to sit 40 degrees either side at full strength).
         warm = hsv(h - 16f, if (neutral) s else s * 0.85f, 1f),
         cool = hsv(h + 18f, if (neutral) s else s * 0.85f, 1f),
-        edge = when { day -> hsv(h, s, 0.62f); appNight -> hsv(h, s * 0.25f, 1f); else -> Color.White },
+        edge = when { day -> hsv(h, s, 0.46f); appNight -> hsv(h, s * 0.25f, 1f); else -> Color.White },
     )
 }
 
