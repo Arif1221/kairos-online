@@ -476,7 +476,19 @@ fun PlayerSheet(
                     },
                 ) { ctrl.expand() },
         ) {
-            MiniContent(vm, ctrl, s.id, s.title, s.artist, now.isPlaying, now.durationMs.takeIf { it > 0 } ?: s.durationMs)
+            // Always measured at the resting mini size. The box around it grows with every frame of the
+            // opening; without this, the whole mini row (texts, buttons) was measured again each frame
+            // for a row that has faded out by a quarter of the way.
+            val miniW = (w - 2 * inset).roundToInt().coerceAtLeast(1)
+            val miniHi = miniH.roundToInt().coerceAtLeast(1)
+            Box(
+                Modifier.layout { m, c ->
+                    val pl = m.measure(Constraints.fixed(miniW, miniHi))
+                    layout(c.maxWidth, c.maxHeight) { pl.place(0, 0) }
+                },
+            ) {
+                MiniContent(vm, ctrl, s.id, s.title, s.artist, now.isPlaying, now.durationMs.takeIf { it > 0 } ?: s.durationMs)
+            }
         }
 
         // 2. The cover, morphing between the mini player, the hero and each page's thumbnail.
@@ -708,6 +720,8 @@ private fun MiniContent(vm: MainViewModel, ctrl: PlayerController, songId: Long,
                 }
             }
             .drawBehind {
+                // Invisible once the player is a quarter open: skip, and stop listening to the position meanwhile.
+                if (ctrl.progress.value >= 0.25f) return@drawBehind
                 val p = pos.value.toFloat() / durationMs.coerceAtLeast(1)
                 val y = size.height - 2.dp.toPx()
                 val l = 22.dp.toPx()

@@ -69,7 +69,9 @@ import com.skarif.kairos.ui.theme.T
 @Composable
 fun SongArt(vm: MainViewModel, song: SongEntity?, size: Dp, modifier: Modifier = Modifier, corner: Dp = 16.dp, large: Boolean = false) {
     val c = P.colors
-    val bmp by produceState<Bitmap?>(null, song?.id, large) {
+    // A cached picture shows on the first frame, so lists and sheets don't flash the placeholder.
+    val first = song?.let { if (large) vm.cachedCover(it) else vm.cachedThumbnail(it) }
+    val bmp by produceState<Bitmap?>(first, song?.id, large) {
         value = song?.let { if (large) vm.cover(it) else vm.thumbnail(it) }
     }
     val img = bmp
@@ -191,7 +193,9 @@ fun SongActionsDialog(
     val hidden by vm.hiddenIds.collectAsStateWithLifecycle()
     val snoozed by vm.snoozedIds.collectAsStateWithLifecycle()
     val excluded by vm.tasteExcluded.collectAsStateWithLifecycle()
-    val shuffleOn = vm.now.collectAsStateWithLifecycle().value.shuffle
+    // Only the shuffle flag matters here; reading all of `now` rebuilt the menu on every play/pause or queue change.
+    val nowState = vm.now.collectAsStateWithLifecycle()
+    val shuffleOn by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { nowState.value.shuffle } }
     val fav = song.id in favs
 
     val favAction = SheetAction(
@@ -200,9 +204,10 @@ fun SongActionsDialog(
     val shareAction = SheetAction("Share", Ic.Share) { shareSong(ctx, song) }
     // Online songs: download to keep on the phone (the online build only).
     val online = song.volume == com.skarif.kairos.data.db.ONLINE_VOLUME && vm.onlineName != null
-    val downloaded = vm.onlineUi.downloadedIds.collectAsStateWithLifecycle().value
-    val downloading = vm.onlineUi.downloading.collectAsStateWithLifecycle().value
-    val onPhone = song.id in vm.onlineUi.savedToPhoneIds.collectAsStateWithLifecycle().value
+    // Download progress ticks many times a second; an offline song's menu doesn't need to hear it.
+    val downloaded = if (online) vm.onlineUi.downloadedIds.collectAsStateWithLifecycle().value else emptySet<Long>()
+    val downloading = if (online) vm.onlineUi.downloading.collectAsStateWithLifecycle().value else emptyMap<Long, Float>()
+    val onPhone = song.id in (if (online) vm.onlineUi.savedToPhoneIds.collectAsStateWithLifecycle().value else emptySet<Long>())
     val downloadAction = when {
         !online -> null
         onPhone && song.id !in downloaded && song.id !in downloading ->

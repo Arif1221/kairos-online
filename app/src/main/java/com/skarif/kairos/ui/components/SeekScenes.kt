@@ -112,7 +112,7 @@ class ScenePalette(
     val glow: Color,
     /** Near-white with a touch of the accent: stars, petals, the moon. */
     val hi: Color,
-    /** The accent's hue turned towards warm and towards cool, for aurora bands and the planet. */
+    /** The accent's hue nudged slightly towards warm and towards cool, for aurora bands and the planet. */
     val warm: Color,
     val cool: Color,
 )
@@ -133,8 +133,10 @@ fun scenePalette(accent: Color, lift: Float = 0f): ScenePalette {
         base = hsv(h, s, 0.92f),
         glow = hsv(h, s * 0.55f, 1f),
         hi = lerp(hsv(h, s * 0.30f, 1f), Color.White, 0.45f),
-        warm = hsv(h - 38f, s, 1f),
-        cool = hsv(h + 42f, s, 1f),
+        // Close to the accent on the colour wheel and a touch softer: the bands read as shades of the
+        // cover's colour, not a rainbow (they used to sit 40 degrees either side at full strength).
+        warm = hsv(h - 16f, if (neutral) s else s * 0.85f, 1f),
+        cool = hsv(h + 18f, if (neutral) s else s * 0.85f, 1f),
     )
 }
 

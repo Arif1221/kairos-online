@@ -2,9 +2,16 @@
 
 ## Unreleased
 
-## Online 0.9.3.0
+## Online 0.9.3.1
+- Fix: build error on newer Compose (`BlurEffect.radiusX` is private); the glass blur tracks its own radius
+- Look: calmer colours. Seek bar scenes (aurora bands, the planet and its ring, wave layers) now stay close to the cover's colour instead of fanning out into a rainbow. The album colour favours the most vivid family over a larger dull one, and the second background glow only appears when that hue really shows on the cover
+- Smoother: opening and minimising the player no longer measures the mini player's row again on every frame, and its progress line stops redrawing once the player is open
+- Smoother: the side menu and the song menus (including the player's three dots) rebuild only when something they show changes, not on every play/pause, queue change or download tick, and covers in them show on the first frame
+- Look: the background glow is back to two colours (top and bottom corners), a calmer page and a little less to draw
 - Fix: a quick double tap no longer opens a page twice or goes back two pages, runs a menu action twice, or closes a sheet twice
 - Smoother: tapping the dock's play button or the mini player again while the player is already opening no longer restarts the opening spring
+
+## Online 0.9.3.0
 - Look: frosted glass. The dock, the mini player and the small title bar now blur the page under them, and the header panel is see-through. Their tint follows the album: lavender glass over a purple cover, more opaque where text needs it (real blur needs Android 12+; older versions get a plain, more opaque bar)
 - Look: in light mode a dark cover now gives a bright pastel background instead of muddy grey, with the same readable text
 - Look: the mini player floats a little higher, with a soft light on top and a fine edge

@@ -518,8 +518,13 @@ fun SortSheet(vm: MainViewModel, onBack: () -> Unit) {
 fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> Unit) {
     val c = P.colors
     val cur by vm.currentSong.collectAsStateWithLifecycle()
-    val now by vm.now.collectAsStateWithLifecycle()
-    val sleep by vm.sleep.collectAsStateWithLifecycle()
+    // Only these few fields are read; derived, so the drawer rebuilds only when one of them changes.
+    val nowState = vm.now.collectAsStateWithLifecycle()
+    val sleepState = vm.sleep.collectAsStateWithLifecycle()
+    val queueShown by remember { androidx.compose.runtime.derivedStateOf { nowState.value.shownSize } }
+    val isPlaying by remember { androidx.compose.runtime.derivedStateOf { nowState.value.isPlaying } }
+    val videoActive by remember { androidx.compose.runtime.derivedStateOf { nowState.value.videoActive } }
+    val sleepOn by remember { androidx.compose.runtime.derivedStateOf { sleepState.value.active } }
     val settings by vm.settings.collectAsStateWithLifecycle()
 
     data class DrawerItem(val label: String, val route: String, val icon: androidx.compose.ui.graphics.vector.ImageVector, val badge: String? = null)
@@ -536,9 +541,9 @@ fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> U
         DrawerItem("Music folders", "folders", Ic.Folder, "Device"),
     )
     val tools = listOf(
-        DrawerItem("Queue", "queue", Ic.Queue, now.shownSize.takeIf { it > 0 }?.toString()),
+        DrawerItem("Queue", "queue", Ic.Queue, queueShown.takeIf { it > 0 }?.toString()),
         DrawerItem("Equalizer", "eq", Ic.Sliders),
-        DrawerItem("Sleep timer", "sleep", Ic.Clock, if (sleep.active) "On" else null),
+        DrawerItem("Sleep timer", "sleep", Ic.Clock, if (sleepOn) "On" else null),
         DrawerItem("Statistics", "stats", Ic.Stats),
     )
 
@@ -604,7 +609,7 @@ fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> U
                 }
                 cur?.let { song ->
                     val src = if (song.volume == com.skarif.kairos.data.db.ONLINE_VOLUME) "Online" else "Offline"
-                    val media = if (now.videoActive) "Video" else "Audio"
+                    val media = if (videoActive) "Video" else "Audio"
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -621,7 +626,7 @@ fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> U
                             Text(song.title, style = T.title, color = c.onAccent, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(song.artist, style = T.small, color = c.onAccent.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        CircleButton(if (now.isPlaying) Ic.Pause else Ic.Play, if (now.isPlaying) "Pause" else "Play", vm::toggle, size = 42.dp, container = c.ink, content = c.inkFg)
+                        CircleButton(if (isPlaying) Ic.Pause else Ic.Play, if (isPlaying) "Pause" else "Play", vm::toggle, size = 42.dp, container = c.ink, content = c.inkFg)
                     }
                 }
             }

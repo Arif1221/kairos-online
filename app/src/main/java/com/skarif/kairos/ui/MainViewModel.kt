@@ -1327,6 +1327,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     suspend fun thumbnail(song: SongEntity): Bitmap? = ct.artwork.load(song, 160)
+    /** The thumbnail if it is already decoded; never touches the disk. */
+    fun cachedThumbnail(song: SongEntity): Bitmap? = ct.artwork.peek(song, 160)
 
     // ---------------------------------------------------------------- colour mood
 

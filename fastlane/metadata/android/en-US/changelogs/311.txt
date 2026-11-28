@@ -1,0 +1,3 @@
+• Calmer colours: seek bar scenes stay close to the album colour, better album colour picking, two-colour background glow
+• Fix: a quick double tap no longer opens a page twice, goes back twice or runs a menu action twice
+• Smoother side menu, song menus, and opening and minimising the player

@@ -149,7 +149,8 @@ class ArtworkRepository(private val context: Context) {
             for (sh in shades) {
                 families.firstOrNull { hueDistance(it.first().hue, sh.hue) <= 30f }?.add(sh) ?: families.add(mutableListOf(sh))
             }
-            val biggest = families.maxBy { f -> f.sumOf { it.share.toDouble() } }
+            // Share counts, but a vivid family beats a larger washed-out one (a grey-ish mass shouldn't win).
+            val biggest = families.maxBy { f -> f.sumOf { (it.share * (0.35f + it.sat)).toDouble() } }
             return biggest.maxBy { it.share * it.sat * (1f - kotlin.math.abs(it.light - 0.5f)) }.rgb
         }
 

@@ -54,7 +54,7 @@ import kotlinx.coroutines.withContext
  * (two drifting textured rectangles). The dots are one tiny tile repeated by a shader. No
  * RenderEffect, no Crossfade, no per-frame colour filter, the same on every Android version.
  *
- * Colour: the glows come from the cover's three most vivid, distinct hues (see [coverTints]), not
+ * Colour: the glows come from the cover's two most vivid, distinct hues (see [coverTints]), not
  * from an average, which turns a multi-coloured cover brown. With no cover (nothing playing, or a
  * song with no art) the page isn't left flat grey: soft glows in the theme's accent colour take over.
  *
@@ -359,11 +359,12 @@ internal fun coverTints(img: ImageBitmap): CoverTints {
     fun apart(i: Int, j: Int): Boolean { val d = kotlin.math.abs(i - j); return minOf(d, HUE_BINS - d) >= 2 }
     val first = wt.indices.maxByOrNull { wt[it] } ?: 0
     val second = wt.indices.filter { apart(it, first) }.maxByOrNull { wt[it] }
-    val third = if (second == null) null else wt.indices.filter { apart(it, first) && apart(it, second) }.maxByOrNull { wt[it] }
     val a = bucket(first)
-    val min = wt[first] * 0.12 // a hue that barely appears isn't worth a glow
-    val b = if (second != null && wt[second] > min) bucket(second) else hueShifted(a, 32f)
-    val c = if (third != null && wt[third] > min) bucket(third) else hueShifted(a, -32f)
+    // A second hue joins only if it really shows (a quarter of the first's weight); a stray accent
+    // would just add clutter, so otherwise the second glow is a close neighbour of the first.
+    val min = wt[first] * 0.25
+    val b = if (second != null && wt[second] > min) bucket(second) else hueShifted(a, 24f)
+    val c = b // the third glow is no longer drawn
     return CoverTints(a, b, c)
 }
 
@@ -378,7 +379,7 @@ internal fun ambientTints(accent: Color): CoverTints {
 }
 
 /**
- * Three big, soft radial glows on slow Lissajous paths; they move only while music plays ([t] stands
+ * Two big, soft radial glows (top-left and bottom-right) on slow Lissajous paths; they move only while music plays ([t] stands
  * still on pause). [boost] scales the strength (the no-cover glows are a little quieter).
  */
 private fun DrawScope.drawTints(tints: CoverTints, alpha: Float, t: Float, dark: Boolean, glow: Float, boost: Float = 1f) {
@@ -389,11 +390,8 @@ private fun DrawScope.drawTints(tints: CoverTints, alpha: Float, t: Float, dark:
     val r = maxOf(size.width, size.height) * 0.8f
     val c1 = Offset(size.width * (0.28f + 0.22f * sin(t * tau / 13f)), size.height * (0.22f + 0.14f * sin(t * tau / 9f + 1.1f)))
     val c2 = Offset(size.width * (0.74f + 0.20f * sin(t * tau / 11f + 2.3f)), size.height * (0.78f + 0.14f * sin(t * tau / 8f + 0.4f)))
-    val c3 = Offset(size.width * (0.55f + 0.28f * sin(t * tau / 12f + 4f)), size.height * (0.50f + 0.20f * sin(t * tau / 10f + 2f)))
     drawCircle(brush = Brush.radialGradient(listOf(tints.a.copy(alpha = strength), Color.Transparent), center = c1, radius = r), radius = r, center = c1)
     drawCircle(brush = Brush.radialGradient(listOf(tints.b.copy(alpha = strength), Color.Transparent), center = c2, radius = r), radius = r, center = c2)
-    // The third colour sits in the middle, where text is, so it is the quietest.
-    drawCircle(brush = Brush.radialGradient(listOf(tints.c.copy(alpha = strength * 0.6f), Color.Transparent), center = c3, radius = r * 0.85f), radius = r * 0.85f, center = c3)
 }
 
 private fun dotTile(step: Int, radius: Float, color: Color): ImageBitmap {
