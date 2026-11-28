@@ -143,24 +143,23 @@ fun scenePalette(accent: Color, lift: Float = 0f, blend: Color = Color.Unspecifi
     if (day) {
         // Light theme: a daytime sky, pale at the horizon and a soft tint above it, with the waves a
         // little deeper so they still read against it. White clouds, petals and stars stay visible high up.
-        // A richer daytime sky: keep the cover hue more present at both the top and horizon.
-        // Neutral artwork remains neutral rather than gaining an artificial colour cast.
-        deep = hsv(h, if (neutral) s else (s * 0.92f).coerceAtMost(1f), 0.68f)
-        mid = hsv(h, if (neutral) s else (s * 0.68f).coerceAtMost(1f), 0.93f)
-        // Keep the page tint subtle; too much blending washed the daytime sky towards the surface.
-        if (blend != Color.Unspecified) { deep = lerp(deep, blend, 0.04f); mid = lerp(mid, blend, 0.08f) }
+        deep = hsv(h, if (neutral) s else s * 0.46f, 0.88f)
+        mid = hsv(h, if (neutral) s else s * 0.22f, 0.98f)
+        if (blend != Color.Unspecified) { deep = lerp(deep, blend, 0.08f); mid = lerp(mid, blend, 0.16f) }
     }
     return ScenePalette(
         deep = deep,
         mid = mid,
-        base = when { day -> hsv(h, (s * 1.12f).coerceAtMost(1f), 0.72f); appNight -> hsv(h, s * 0.85f, 0.88f); else -> hsv(h, s, 0.92f) },
-        glow = if (day) hsv(h, (s * 0.95f).coerceAtMost(1f), 0.84f) else hsv(h, s * 0.55f, 1f),
+        base = when { day -> hsv(h, (s * 1.05f).coerceAtMost(1f), 0.74f); appNight -> hsv(h, s * 0.85f, 0.88f); else -> hsv(h, s, 0.92f) },
+        glow = if (day) hsv(h, s * 0.85f, 0.90f) else hsv(h, s * 0.55f, 1f),
         hi = lerp(hsv(h, s * 0.30f, 1f), Color.White, 0.45f),
         // Close to the accent on the colour wheel and a touch softer: the bands read as shades of the
         // cover's colour, not a rainbow (they used to sit 40 degrees either side at full strength).
-        warm = hsv(h - 16f, if (neutral) s else s * 0.85f, 1f),
-        cool = hsv(h + 18f, if (neutral) s else s * 0.85f, 1f),
-        edge = when { day -> hsv(h, s, 0.46f); appNight -> hsv(h, s * 0.25f, 1f); else -> Color.White },
+        // By day the layers must differ in lightness too (a pale sky swallows hue alone): the warm one
+        // is light and the cool one deep, with a slightly wider hue step than at night.
+        warm = if (day) hsv(h - 22f, if (neutral) s else s * 0.80f, 0.98f) else hsv(h - 16f, if (neutral) s else s * 0.85f, 1f),
+        cool = if (day) hsv(h + 24f, s, 0.58f) else hsv(h + 18f, if (neutral) s else s * 0.85f, 1f),
+        edge = when { day -> hsv(h, s, 0.55f); appNight -> hsv(h, s * 0.25f, 1f); else -> Color.White },
     )
 }
 
@@ -642,12 +641,13 @@ private fun DrawScope.drawProgress(p: ScenePalette, style: SeekStyle, t: Float, 
             ),
         )
         buildWave(path, 0, playX, t, amp, beat, wide, close = false)
-        drawPath(path, p.glow.copy(alpha = 0.40f), style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-        drawPath(path, p.edge.copy(alpha = 0.95f), style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(path, p.glow.copy(alpha = 0.20f), style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(path, p.edge.copy(alpha = 0.70f), style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
-    val sw = 1.5.dp.toPx()
+    // A hairline, only there to define the pill; it used to be a bright 1.5 dp ring.
+    val sw = 1.dp.toPx()
     drawRoundRect(
-        p.glow.copy(alpha = 0.80f), topLeft = Offset(sw / 2f, sw / 2f), size = Size(w - sw, h - sw),
+        p.glow.copy(alpha = 0.22f), topLeft = Offset(sw / 2f, sw / 2f), size = Size(w - sw, h - sw),
         cornerRadius = CornerRadius((h - sw) / 2f), style = Stroke(width = sw),
     )
 }
@@ -661,7 +661,7 @@ private fun DrawScope.drawKnob(p: ScenePalette, style: SeekStyle, t: Float, amp:
     val halo = r * (3.2f + 0.8f * lens + 0.6f * beat)
     drawCircle(Brush.radialGradient(listOf(p.glow.copy(alpha = 0.65f), Color.Transparent), center = c, radius = halo), radius = halo, center = c)
     drawCircle(Color.White, r, c)
-    drawCircle(p.base.copy(alpha = 0.40f), r, c, style = Stroke(width = 1.5.dp.toPx()))
+    drawCircle(p.base.copy(alpha = 0.18f), r, c, style = Stroke(width = 1.dp.toPx()))
 }
 
 /** The two canvases of a scene seek bar: the clipped pill with its scene and progress, and the knob on top, unclipped so its glow isn't cut. */

@@ -114,7 +114,7 @@ class BackdropState {
 // How much of the theme's veil is drawn over the living cover (was 0.88 / 0.42 / 0.52 / 0.86 / 0.72).
 // Lower = more cover colour shows through; raise VEIL_MID if text over a very bright cover gets hard to read.
 private const val VEIL_EDGE = 0.58f
-private const val VEIL_MID = 0.30f
+private const val VEIL_MID = 0.20f
 private const val VEIL_MID_PURE = 0.30f
 private const val VEIL_LIGHT = 0.40f
 
@@ -161,7 +161,7 @@ fun rememberBackdrop(art: Bitmap?, enabled: Boolean, playing: Boolean = false, g
             // Dark theme, the mirror image: a bright cover is brought down to a deep, rich tone (no neon),
             // so both themes read as the same soft, tinted page.
             val shown = if (dark) dimmed(tiny, DARK_CEILING) else lifted(tiny, LIGHT_FLOOR)
-            Triple(saturated(shown, if (dark) 1.15f else 1.25f), coverTints(tiny), lumaOf(shown))
+            Triple(saturated(shown, if (dark) 1.25f else 1.25f), coverTints(tiny), lumaOf(shown))
         }
         val next = built?.first
         if (next === state.current) return@LaunchedEffect
@@ -405,7 +405,7 @@ private fun dotTile(step: Int, radius: Float, color: Color): ImageBitmap {
 }
 
 /** Dark theme: the brightest a cover pixel may be (HSV value, 0..1). Lower for deeper, calmer colour. */
-private const val DARK_CEILING = 0.62f
+private const val DARK_CEILING = 0.86f
 
 /** Light theme: the darkest a cover pixel may be (HSV value, 0..1). Raise for brighter, lower for more contrast. */
 private const val LIGHT_FLOOR = 0.66f

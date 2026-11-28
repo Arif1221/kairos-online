@@ -217,7 +217,10 @@ fun Pill(
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
     ) {
         if (icon != null) Icon(icon, null, tint = fgA, modifier = Modifier.size(18.dp))
-        Text(text, color = fgA, style = if (big) T.title.copy(fontSize = 17.sp) else T.label, maxLines = 1)
+        // A label that changes ("Scan again" to "Scanning…", "Update now" to "Try again") fades across.
+        androidx.compose.animation.Crossfade(text, animationSpec = tween(160), label = "pillLabel") { label ->
+            Text(label, color = fgA, style = if (big) T.title.copy(fontSize = 17.sp) else T.label, maxLines = 1)
+        }
     }
 }
 
@@ -725,7 +728,9 @@ fun KairosDialog(
                 }
                 .heightIn(max = 620.dp)
                 .clip(RoundedCornerShape(30.dp)).background(containerColor)
-                .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 14.dp),
+                // The same hairline the cards and buttons have, so a popup reads as part of the app (more so in dark mode).
+                .border(1.dp, P.colors.line.copy(alpha = if (P.colors.dark) 0.30f else 0.20f), RoundedCornerShape(30.dp))
+                .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             title?.invoke()
@@ -735,6 +740,46 @@ fun KairosDialog(
                 confirmButton()
             }
         }
+    }
+}
+
+/**
+ * A smooth progress bar: the fill glides to each new value instead of stepping, with a soft
+ * gradient along it. [progress] null = unknown length: a short bar sweeps across.
+ */
+@Composable
+fun SmoothProgressBar(progress: Float?, modifier: Modifier = Modifier, height: Dp = 10.dp) {
+    val c = P.colors
+    val shown by androidx.compose.animation.core.animateFloatAsState(
+        progress?.coerceIn(0f, 1f) ?: 0f,
+        androidx.compose.animation.core.tween(280, easing = androidx.compose.animation.core.LinearEasing),
+        label = "progressFill",
+    )
+    val sweep = if (progress == null) {
+        androidx.compose.animation.core.rememberInfiniteTransition(label = "progressSweep").animateFloat(
+            0f, 1f,
+            androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(1200, easing = androidx.compose.animation.core.LinearEasing)),
+            label = "progressSweepX",
+        )
+    } else null
+    Box(
+        modifier.fillMaxWidth().height(height).clip(RoundedCornerShape(50)).background(c.line)
+            .semantics { if (progress != null) contentDescription = "${(progress * 100).toInt()} percent" },
+    ) {
+        Box(
+            Modifier.matchParentSize().drawBehind {
+                val r = CornerRadius(size.height / 2f)
+                val head = androidx.compose.ui.graphics.lerp(c.accent, Color.White, if (c.dark) 0.22f else 0.12f)
+                if (sweep == null) {
+                    val w = (size.width * shown).coerceAtLeast(if (shown > 0f) size.height else 0f)
+                    if (w > 0f) drawRoundRect(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(c.accent, head), endX = w), size = Size(w, size.height), cornerRadius = r)
+                } else {
+                    val seg = size.width * 0.34f
+                    val x = -seg + (size.width + seg) * sweep.value
+                    drawRoundRect(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(c.accent, head), startX = x, endX = x + seg), Offset(x, 0f), Size(seg, size.height), r)
+                }
+            },
+        )
     }
 }
 

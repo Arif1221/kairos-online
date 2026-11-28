@@ -13,8 +13,8 @@ android {
         minSdk = 28 // DynamicsProcessing (10-band EQ) needs Android 9
         targetSdk = 37
         // Online: main's version + a 4th online number; versionCode = main's * 10 + that number.
-        versionCode = 313
-        versionName = "0.9.3.3"
+        versionCode = 314
+        versionName = "0.9.3.4"
     }
 
     // Release signing comes from the environment (GitHub secrets in CI), never from the repo.

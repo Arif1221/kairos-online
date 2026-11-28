@@ -555,13 +555,21 @@ private fun NavGraphBuilder.screen(route: String, content: @Composable (NavBackS
     composable(route) { entry -> ProvideNavScope(this) { content(entry) } }
 
 /**
- * Page pushes and backs are ignored while the current page is still animating: a double tap used
- * to push the same page twice, or pop two pages at once.
+ * A page push or back is ignored for a moment after the previous one: a double tap used to push the
+ * same page twice, or pop two pages at once. It is a short pause, not "wait for the animation to
+ * finish": the page springs take about half a second to settle completely, and waiting for that
+ * made quick, deliberate taps (open a page, go straight back) feel dropped.
  */
-private fun NavHostController.settled() =
-    currentBackStackEntry?.lifecycle?.currentState == androidx.lifecycle.Lifecycle.State.RESUMED
-private fun NavHostController.push(route: String) { if (settled()) navigate(route) }
-private fun NavHostController.back() { if (settled()) popBackStack() }
+private const val NAV_DEBOUNCE_MS = 320L
+private var lastNavAt = 0L
+private fun navReady(): Boolean {
+    val now = android.os.SystemClock.uptimeMillis()
+    if (now - lastNavAt < NAV_DEBOUNCE_MS) return false
+    lastNavAt = now
+    return true
+}
+private fun NavHostController.push(route: String) { if (navReady()) navigate(route) }
+private fun NavHostController.back() { if (navReady()) popBackStack() }
 
 /** Tab-style navigation: one copy of each tab, Home at the bottom of the stack. */
 private fun NavHostController.tab(route: String) = navigate(route) {

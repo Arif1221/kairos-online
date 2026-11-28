@@ -32,7 +32,8 @@ import java.net.URL
 object SelfUpdate {
     sealed interface Status {
         data object Idle : Status
-        data class Downloading(val progress: Float) : Status
+        /** [done] and [total] are bytes; [total] is 0 when the server didn't say. */
+        data class Downloading(val progress: Float, val done: Long = 0L, val total: Long = 0L) : Status
         data object Installing : Status
         data class Failed(val message: String) : Status
     }
@@ -95,7 +96,8 @@ object SelfUpdate {
                                     done += n
                                     if (total > 0) {
                                         val p = done.toFloat() / total
-                                        if (p - shown >= 0.02f) { shown = p; _status.value = Status.Downloading(p) }
+                                        // Every half percent: the bar glides between updates, so it moves smoothly, not in steps.
+                                        if (p - shown >= 0.005f) { shown = p; _status.value = Status.Downloading(p, done, total) }
                                     }
                                 }
                             }

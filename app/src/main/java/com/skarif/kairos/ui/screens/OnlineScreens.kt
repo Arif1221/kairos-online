@@ -51,6 +51,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -910,20 +911,47 @@ fun UpdateDialog(vm: MainViewModel) {
     KairosDialog(
         onDismissRequest = { if (!busy) o.skipUpdate(u.version) },
         containerColor = c.sheet,
-        title = { Text("Kairos Online ${u.version} is here", style = T.h2, color = c.text) },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.size(40.dp).clip(CircleShape).background(c.tint), contentAlignment = Alignment.Center) {
+                    Icon(Ic.DownArrow, null, tint = c.accent, modifier = Modifier.size(20.dp))
+                }
+                Column {
+                    Text("Update available", style = T.kicker, color = c.muted)
+                    Text("Kairos Online ${u.version}", style = T.h2, color = c.text)
+                }
+            }
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (u.notes.isNotEmpty()) {
                     Text("What's new", style = T.title, color = c.text)
-                    u.notes.forEach { Text("• $it", style = T.body, color = c.muted) }
+                    u.notes.forEach { note ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Box(Modifier.padding(top = 8.dp).size(6.dp).clip(CircleShape).background(c.accent))
+                            Text(note, Modifier.weight(1f), style = T.body, color = c.muted)
+                        }
+                    }
                 } else Text("Fixes and improvements.", style = T.body, color = c.muted)
                 when (val st = status) {
                     is com.skarif.kairos.online.SelfUpdate.Status.Downloading -> {
-                        Text("Downloading ${(st.progress * 100).toInt()}%", style = T.small, color = c.text)
-                        PillMeter((st.progress * 20).toInt(), 20, c.accent, height = 10.dp)
+                        Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text("Downloading", Modifier.weight(1f), style = T.small.copy(fontWeight = FontWeight.SemiBold), color = c.text)
+                                Text("${(st.progress * 100).toInt()}%", style = T.num, color = c.text)
+                            }
+                            com.skarif.kairos.ui.components.SmoothProgressBar(st.progress)
+                            if (st.total > 0) Text(
+                                String.format("%.1f of %.1f MB", st.done / 1_048_576.0, st.total / 1_048_576.0),
+                                style = T.small, color = c.muted,
+                            )
+                        }
                     }
-                    com.skarif.kairos.online.SelfUpdate.Status.Installing ->
-                        Text("Installing. Kairos closes for a moment and the notification opens it again.", style = T.small, color = c.text)
+                    com.skarif.kairos.online.SelfUpdate.Status.Installing -> Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Installing", style = T.small.copy(fontWeight = FontWeight.SemiBold), color = c.text)
+                        com.skarif.kairos.ui.components.SmoothProgressBar(null)
+                        Text("Kairos closes for a moment and the notification opens it again.", style = T.small, color = c.muted)
+                    }
                     is com.skarif.kairos.online.SelfUpdate.Status.Failed -> Text(st.message, style = T.small, color = c.accent)
                     else -> Text(
                         if (com.skarif.kairos.online.SelfUpdate.canInstall(ctx)) "Installs right here, over this version. Your music, playlists and settings stay."

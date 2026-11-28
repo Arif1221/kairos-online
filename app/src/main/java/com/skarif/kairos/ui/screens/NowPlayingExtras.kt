@@ -4,7 +4,21 @@ import com.skarif.kairos.ui.components.Ic
 import com.skarif.kairos.ui.components.SheetAction
 
 import android.content.Intent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +27,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
@@ -215,19 +230,20 @@ private fun SongInfoRows(vm: MainViewModel, song: SongEntity) {
         "Length" to formatTime(song.durationMs),
         "Format" to song.formatLabel() + if (song.bitrate > 0) ", ${song.bitrate / 1000} kbps" else "",
         now.output?.takeIf { now.songId == song.id }?.let { "Output now" to it },
-        "Size" to String.format("%.1f MB", song.sizeBytes / 1_000_000.0),
+        song.sizeBytes.takeIf { it > 0 }?.let { "Size" to String.format("%.1f MB", it / 1_000_000.0) },
         "Plays" to "${counts[song.id] ?: 0}",
         "Added" to java.time.Instant.ofEpochSecond(song.dateAddedSec).atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString(),
         "File" to song.folder + song.fileName,
     )
     // A small memory: when this song first came into your life (from your listening history).
     val first by androidx.compose.runtime.produceState<Long?>(null, song.id) { value = vm.firstPlayedAt(song.id) }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        first?.let { Text(firstPlayedLine(it), style = T.body.copy(fontWeight = FontWeight.SemiBold), color = c.accent, modifier = Modifier.padding(bottom = 6.dp)) }
-        rows.forEach { (k, v) ->
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column {
+        first?.let { Text(firstPlayedLine(it), style = T.body.copy(fontWeight = FontWeight.SemiBold), color = c.accent, modifier = Modifier.padding(bottom = 8.dp)) }
+        rows.forEachIndexed { i, (k, v) ->
+            if (i > 0) HorizontalDivider(thickness = 0.5.dp, color = c.line)
+            Row(Modifier.padding(vertical = 9.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
                 Text(k, Modifier.width(96.dp), style = T.small, color = c.muted)
-                Text(v, Modifier.weight(1f), style = T.small.copy(fontWeight = FontWeight.SemiBold), color = c.text)
+                Text(v, Modifier.weight(1f), style = T.small.copy(fontWeight = FontWeight.SemiBold), color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -255,17 +271,34 @@ fun TimeRow(vm: MainViewModel, durationMs: Long) {
 }
 
 @Composable
-private fun InfoCard(title: String, action: String? = null, onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
+private fun InfoCard(
+    title: String, icon: ImageVector, action: String? = null, onClick: (() -> Unit)? = null,
+    tinted: Boolean = false, content: @Composable () -> Unit,
+) {
     val c = P.colors
+    val shape = RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card)
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card)).background(c.card)
+        Modifier.fillMaxWidth().clip(shape)
+            .background(if (tinted) androidx.compose.ui.graphics.lerp(c.card, c.accent, if (c.dark) 0.12f else 0.09f) else c.card)
+            .border(1.dp, c.line.copy(alpha = if (c.dark) 0.30f else 0.20f), shape)
             .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(Modifier.size(32.dp).clip(CircleShape).background(c.tint), contentAlignment = Alignment.Center) {
+                Icon(icon, null, tint = c.accent, modifier = Modifier.size(17.dp))
+            }
             Text(title, Modifier.weight(1f), style = T.title.copy(fontSize = 18.sp), color = c.text)
-            if (action != null) Text(action, style = T.small.copy(fontWeight = FontWeight.SemiBold), color = c.muted)
+            if (action != null) {
+                Row(
+                    Modifier.clip(RoundedCornerShape(50)).background(if (tinted) c.card.copy(alpha = 0.7f) else c.chip).padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(action, style = T.small.copy(fontWeight = FontWeight.SemiBold), color = c.text)
+                    Icon(Ic.Chevron, null, tint = c.muted, modifier = Modifier.size(15.dp))
+                }
+            }
         }
         content()
     }
@@ -294,27 +327,53 @@ fun NowPlayingCards(
             // not on every position tick (the whole Column used to recompose about every 100 ms).
             val pos = vm.position.collectAsStateWithLifecycle()
             val at by remember(l, offset) { androidx.compose.runtime.derivedStateOf { if (l.synced) l.indexAt(pos.value - offset).coerceAtLeast(0) else 0 } }
-            InfoCard("Lyrics", "Show all", onLyrics) {
-                l.lines.drop(at).take(if (l.synced) 3 else 4).forEachIndexed { i, line ->
-                    Text(
-                        line.text.ifBlank { "♪" }, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                        style = T.title.copy(fontSize = if (i == 0 && l.synced) 20.sp else 17.sp),
-                        color = if (i == 0 || !l.synced) c.text else c.muted,
-                    )
+            InfoCard("Lyrics", Ic.Lyrics, "Show all", onLyrics, tinted = true) {
+                // The block rolls up as the song moves to the next line (and down if you seek back),
+                // and the lines fade with distance from the one being sung.
+                AnimatedContent(
+                    targetState = at,
+                    transitionSpec = {
+                        val forward = targetState >= initialState
+                        val dir = if (forward) 1 else -1
+                        (slideInVertically(tween(420, easing = FastOutSlowInEasing)) { dir * (it / 3) } + fadeIn(tween(320, delayMillis = 60)))
+                            .togetherWith(slideOutVertically(tween(320, easing = FastOutSlowInEasing)) { -dir * (it / 3) } + fadeOut(tween(200)))
+                            .using(SizeTransform(clip = false))
+                    },
+                    label = "lyricsPreview",
+                ) { idx ->
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        l.lines.drop(idx).take(if (l.synced) 3 else 4).forEachIndexed { i, line ->
+                            Text(
+                                line.text.ifBlank { "♪" }, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                style = T.title.copy(
+                                    fontSize = if (i == 0 && l.synced) 23.sp else 17.sp,
+                                    lineHeight = if (i == 0 && l.synced) 28.sp else 22.sp,
+                                    fontWeight = if (i == 0 && l.synced) FontWeight.ExtraBold else FontWeight.SemiBold,
+                                ),
+                                color = when {
+                                    !l.synced -> c.text
+                                    i == 0 -> c.text
+                                    i == 1 -> c.text.copy(alpha = 0.55f)
+                                    else -> c.text.copy(alpha = 0.32f)
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
 
         // Up next: the next three songs in the queue.
         val next = now.queue.drop(now.queuePosition + 1).take(3).mapNotNull { songMap[it.songId] }
-        InfoCard("Up next", "Open queue", onQueue) {
+        InfoCard("Up next", Ic.Queue, "Open queue", onQueue) {
             if (next.isEmpty()) {
                 Text(
                     if (autoplay) "End of the queue. Autoplay will add similar songs." else "End of the queue.",
                     style = T.small, color = c.muted,
                 )
             }
-            next.forEach { s ->
+            next.forEachIndexed { n, s ->
+                if (n > 0) HorizontalDivider(Modifier.padding(start = 56.dp, top = 0.dp), thickness = 0.5.dp, color = c.line)
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     SongArt(vm, s, 44.dp, corner = 12.dp)
                     Column(Modifier.weight(1f)) {
@@ -332,7 +391,7 @@ fun NowPlayingCards(
         if (artist != null) {
             val plays = artist.songs.sumOf { counts[it.id] ?: 0 }
             val albums = artist.songs.distinctBy { vm.albumGroup(it.albumId)?.id ?: it.albumId }.size
-            InfoCard("About the artist", "Open", { onOpenCollection("artist:${artist.name}") }) {
+            InfoCard("About the artist", Ic.Person, "Open", { onOpenCollection("artist:${artist.name}") }) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     SongArt(vm, artist.songs.maxByOrNull { counts[it.id] ?: 0 } ?: song, 64.dp, corner = 32.dp)
                     Column(Modifier.weight(1f)) {
@@ -363,7 +422,7 @@ fun NowPlayingCards(
         }
 
         // Credits.
-        InfoCard("Song info") { SongInfoRows(vm, song) }
+        InfoCard("Song info", Ic.Info) { SongInfoRows(vm, song) }
         Box(Modifier.padding(bottom = 24.dp))
     }
 }

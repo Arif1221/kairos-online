@@ -2,23 +2,25 @@
 
 ## Unreleased
 
-## Online 0.9.3.3
-- Look: richer light-mode seek bars. The daytime sky carries more of the album cover's colour at the top and horizon, blends less into the page, and has slightly more saturated waves with a deeper played-part glow and line. Dark mode and the Home card are unchanged.
-
-## Online 0.9.3.2
+## Online 0.9.3.4
+- Updater: the download shows a smooth progress bar (it glides instead of stepping in 20 blocks) with the percentage and "12.4 of 41.0 MB", a sweeping bar while it installs, and a tidier popup with an icon and bullet points
+- Popups have the same hairline outline as cards and buttons, and a button whose label changes (such as "Scan again" to "Scanning…") fades between the two
+- Look: the seek bar's borders are quieter in both themes: a hairline pill outline instead of a bright ring, a thinner and softer line along the played wave, and a fainter ring on the knob
+- Player: the cards under the controls are redesigned. Each has an icon badge and a small "Show all / Open queue" button, a thin outline that matches the buttons, Up next has dividers, and Song info is a tidy table (and hides "0.0 MB" for streamed songs)
+- Player: the lyrics card is animated. When the song reaches the next line the block rolls up (and down if you seek back), the line being sung is big and bold, and the lines after it fade with distance. The card has a soft tint of the album colour
 - Look: dark-mode buttons. Round buttons, pills and the Segmented track sit one step above the card (they used to melt into it), the selected pill, the dock's active button and the player's big buttons use a soft stone instead of near-white glare, and the equalizer and sleep timer buttons follow the theme
-- Look: dark mode matches the light one across the app. The living background brings a bright cover down to a deep, rich tone (no neon) the way light mode lifts a dark one to a pastel, the cover colour boost and the colour glows are gentler, the veil a little heavier, and the dark greys carry the same slight warmth as the light theme
+- Look: dark mode matches the light one across the app. The living background brings a bright cover down to a deep, rich tone (no neon) the way light mode lifts a dark one to a pastel, the cover colour boost and the colour glows are a little gentler, the veil a little lighter, and the dark greys carry the same slight warmth as the light theme
 - Look: dark-mode seek bars match the light ones: a dark, muted tint of the cover's colour blended into the dark surface, softer waves and a soft light line on the played part (no more saturated dark blocks)
 - Playlists: the playlist menu has Sort by (title, artist, album, newest, oldest, reverse, shuffle order), Duplicate playlist and Remove duplicate songs (shown when there are any). Sorting and removing duplicates can be undone
 - Backup: playlist covers you set are saved in the backup and come back on restore. Backups are now version 2 (older backups still restore; a backup from a newer Kairos is refused with a clear message instead of half-restoring)
-- Look: seek bars follow the theme. Light mode gets a daytime sky (a clear tint of the cover's colour, paler at the horizon, deeper waves and a deeper line on the played part); dark mode keeps the night sky
+- Look: seek bars follow the theme. Light mode gets a bright daytime sky (a light, clear tint of the cover's colour, paler at the horizon, waves that differ in lightness as well as hue, and a deeper line on the played part); dark mode keeps the night sky
 - Look: the seek bar scenes are lighter and quieter. The sky is a soft tint of the cover's colour (less saturated, less dark) blended towards the page colour, so the bar sits in the app instead of being a dark coloured block
 - Fix: build error on newer Compose (`BlurEffect.radiusX` is private); the glass blur tracks its own radius
 - Look: calmer colours. Seek bar scenes (aurora bands, the planet and its ring, wave layers) now stay close to the cover's colour instead of fanning out into a rainbow. The album colour favours the most vivid family over a larger dull one, and the second background glow only appears when that hue really shows on the cover
 - Smoother: opening and minimising the player no longer measures the mini player's row again on every frame, and its progress line stops redrawing once the player is open
 - Smoother: the side menu and the song menus (including the player's three dots) rebuild only when something they show changes, not on every play/pause, queue change or download tick, and covers in them show on the first frame
 - Look: the background glow is back to two colours (top and bottom corners), a calmer page and a little less to draw
-- Fix: a quick double tap no longer opens a page twice or goes back two pages, runs a menu action twice, or closes a sheet twice
+- Fix: a quick double tap no longer opens a page twice or goes back two pages (a short pause after each page change, so deliberate quick taps still work), runs a menu action twice, or closes a sheet twice
 - Smoother: tapping the dock's play button or the mini player again while the player is already opening no longer restarts the opening spring
 
 ## Online 0.9.3.0
