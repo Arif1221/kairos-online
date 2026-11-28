@@ -116,6 +116,9 @@ fun NowPlayingPane(
     val videoState by vm.videoState.collectAsStateWithLifecycle()
     val wantsVideo by vm.wantsVideo.collectAsStateWithLifecycle()
     val wantsVideoNow = rememberUpdatedState(wantsVideo)
+    // Video was on, but this song has none: the player has already gone back to the sound; a small note
+    // says so for a few seconds and offers to look for a video.
+    val videoFellBack by vm.videoFellBack.collectAsStateWithLifecycle()
     val lyricsState by vm.lyrics.collectAsStateWithLifecycle()
     val hasSyncedLyrics = (lyricsState as? com.skarif.kairos.ui.LyricsState.Ready)?.lyrics?.let { it.synced && !it.isEmpty() } == true
     val s = song ?: return
@@ -310,6 +313,32 @@ fun NowPlayingPane(
                     }
                     CircleButton(Ic.Lyrics, "Lyrics", onLyrics, container = Color(0x59000000), content = Color.White)
                     CircleButton(Ic.More, "More options", { menu = true }, container = Color(0x59000000), content = Color.White)
+                }
+                var noVideoNote by remember(s.id) { androidx.compose.runtime.mutableStateOf(false) }
+                LaunchedEffect(videoFellBack, s.id) {
+                    noVideoNote = videoFellBack
+                    if (videoFellBack) { kotlinx.coroutines.delay(6_000); noVideoNote = false }
+                }
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = noVideoNote && showToggle,
+                    modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 70.dp),
+                    enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(220)) +
+                        androidx.compose.animation.slideInVertically(androidx.compose.animation.core.tween(260)) { -it / 2 },
+                    exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(400)),
+                ) {
+                    Row(
+                        Modifier.clip(androidx.compose.foundation.shape.CircleShape).background(Color(0xB3000000))
+                            .border(1.dp, Color.White.copy(alpha = 0.14f), androidx.compose.foundation.shape.CircleShape)
+                            .clickable(role = Role.Button) { noVideoNote = false; videoHelp = videoState }
+                            .padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text("No video for this song", style = T.small.copy(fontWeight = FontWeight.SemiBold), color = Color.White)
+                        Box(
+                            Modifier.clip(androidx.compose.foundation.shape.CircleShape).background(P.colors.accent).padding(horizontal = 12.dp, vertical = 5.dp),
+                        ) { Text("Find video", style = T.small.copy(fontWeight = FontWeight.Bold), color = P.colors.onAccent) }
+                    }
                 }
                 // Video controls. They are drawn here, after the gesture layer, so they get the touches;
                 // the video itself is drawn by the player layer underneath this page.
@@ -522,7 +551,7 @@ private fun InfoChip(icon: androidx.compose.ui.graphics.vector.ImageVector, text
     Row(
         Modifier.height(44.dp)
             .then(if (onClick != null) com.skarif.kairos.ui.components.PressScaleHolder.modifier(press, 0.94f) else Modifier)
-            .clip(RoundedCornerShape(22.dp)).background(c.card)
+            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)).background(c.card)
             .then(if (onClick != null) Modifier.clickable(interactionSource = press, indication = androidx.compose.material3.ripple(), role = Role.Button, onClick = onClick) else Modifier)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,

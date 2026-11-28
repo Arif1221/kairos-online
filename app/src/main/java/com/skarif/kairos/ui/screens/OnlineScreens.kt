@@ -1,5 +1,6 @@
 package com.skarif.kairos.ui.screens
 
+import com.skarif.kairos.ui.components.cardSurface
 import android.graphics.Bitmap
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -495,12 +496,9 @@ fun ExploreScreen(
 @Composable
 private fun Banner(title: String, text: String, action: (@Composable () -> Unit)? = null) {
     val c = P.colors
-    val hairline = c.line.copy(alpha = if (c.dark) 0.45f else 0.30f)
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 18.dp)
-            .clip(RoundedCornerShape(24.dp))
-            .background(c.card.copy(alpha = if (c.dark) 0.85f else 0.92f))
-            .border(1.dp, hairline, RoundedCornerShape(24.dp))
+            .cardSurface(com.skarif.kairos.ui.theme.Radius.item)
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -564,7 +562,7 @@ fun LazyGridScope.onlineSearchItems(
 @Composable
 private fun SkeletonRow() {
     val c = P.colors
-    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         Box(Modifier.size(52.dp).clip(RoundedCornerShape(16.dp)).background(c.tint))
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Box(Modifier.size(180.dp, 14.dp).clip(RoundedCornerShape(6.dp)).background(c.tint))

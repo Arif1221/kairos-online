@@ -1,5 +1,9 @@
 package com.skarif.kairos.ui.screens
 
+import com.skarif.kairos.ui.components.cardSurface
+import androidx.compose.foundation.border
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
@@ -120,7 +124,10 @@ fun OnboardingScreen(vm: MainViewModel, onDone: () -> Unit) {
             // Progress dots and Skip (to the music step: the choices can wait, the permission can't).
             if (!scanning) {
                 Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        Modifier.weight(1f).androidxSemantics("Step ${step + 1} of $STEPS"),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         repeat(STEPS) { i ->
                             val w by animateDpAsState(if (i == step) 26.dp else 8.dp, Motion.spatial(), label = "dot")
                             val col by animateColorAsState(if (i <= step) c.accent else c.line, tween(250), label = "dotC")
@@ -131,7 +138,7 @@ fun OnboardingScreen(vm: MainViewModel, onDone: () -> Unit) {
                         "Skip", style = T.title, color = c.muted,
                         modifier = Modifier.clip(RoundedCornerShape(12.dp))
                             .clickable(role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Skip to music access") { step = STEPS - 1 }
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                            .padding(horizontal = 14.dp, vertical = 11.dp),
                     )
                 }
             }
@@ -183,6 +190,9 @@ fun OnboardingScreen(vm: MainViewModel, onDone: () -> Unit) {
         }
     }
 }
+
+private fun Modifier.androidxSemantics(label: String): Modifier =
+    this.then(Modifier.semantics { contentDescription = label })
 
 /** Each part of a step rises in after the one before: [k] is its place in the order. */
 @Composable
@@ -315,7 +325,7 @@ private fun TourStep(online: String?) {
 private fun TourCard(icon: ImageVector, title: String, body: String, modifier: Modifier) {
     val c = P.colors
     Row(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card)).background(c.card).padding(16.dp),
+        modifier.fillMaxWidth().cardSurface(com.skarif.kairos.ui.theme.Radius.card, c.card).padding(16.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Box(Modifier.size(46.dp).clip(RoundedCornerShape(16.dp)).background(c.accent), contentAlignment = Alignment.Center) {
@@ -357,7 +367,7 @@ private fun ChoicesStep(vm: MainViewModel) {
 private fun ChoiceCard(modifier: Modifier, content: @Composable ColumnScope.() -> Unit) {
     val c = P.colors
     Column(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card)).background(c.card).padding(16.dp),
+        modifier.fillMaxWidth().cardSurface(com.skarif.kairos.ui.theme.Radius.card, c.card).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp), content = content,
     )
 }

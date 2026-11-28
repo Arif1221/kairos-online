@@ -1,5 +1,6 @@
 package com.skarif.kairos.ui.screens
 
+import com.skarif.kairos.ui.components.cardSurface
 import com.skarif.kairos.ui.components.backdrop
 import com.skarif.kairos.ui.components.headerPanel
 
@@ -193,7 +194,7 @@ fun QueuePane(vm: MainViewModel, onBack: () -> Unit, onSaveAsPlaylist: () -> Uni
             Text(
                 if (now.shuffle) "Swipe left to remove. Hold a song for more."
                 else "Drag ≡ to reorder. Swipe right to play next, left to remove.",
-                Modifier.padding(horizontal = 22.dp, vertical = 8.dp), style = T.small, color = c.muted,
+                Modifier.padding(horizontal = 18.dp, vertical = 8.dp), style = T.small, color = c.muted,
             )
 
             // Drag to reorder (shuffle off). Plain values, read while drawing: no recomposition per move.
@@ -515,7 +516,8 @@ fun SortSheet(vm: MainViewModel, onBack: () -> Unit) {
 
 /** Slide-in menu with grouped sections and clear Online/Offline & Audio/Video context. */
 @Composable
-fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> Unit) {
+/** [current] is the route of the page behind the menu; its row is highlighted. */
+fun MenuDrawer(vm: MainViewModel, current: String? = null, onClose: () -> Unit, onNavigate: (String) -> Unit) {
     val c = P.colors
     val cur by vm.currentSong.collectAsStateWithLifecycle()
     // Only these few fields are read; derived, so the drawer rebuilds only when one of them changes.
@@ -554,25 +556,25 @@ fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> U
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
-                    .background(c.card.copy(alpha = if (c.dark) 0.85f else 0.92f)) // same as the pages' cards
-                    .border(1.dp, c.line.copy(alpha = if (c.dark) 0.35f else 0.25f), RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)),
+                    .cardSurface(com.skarif.kairos.ui.theme.Radius.item),
             ) {
                 items.forEachIndexed { idx, item ->
-                    if (idx > 0) Box(Modifier.fillMaxWidth().padding(start = 52.dp).height(0.8.dp).background(c.line.copy(alpha = 0.25f)))
+                    if (idx > 0) Box(Modifier.fillMaxWidth().padding(start = 56.dp).height(0.8.dp).background(c.line.copy(alpha = 0.25f)))
+                    val here = item.route == current
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .height(48.dp)
-                            .selectable(false, role = Role.Button) { onNavigate(item.route) }
+                            .height(52.dp)
+                            .background(if (here) c.accent.copy(alpha = 0.14f) else Color.Transparent)
+                            .selectable(here, role = Role.Button) { onNavigate(item.route) }
                             .padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Box(Modifier.size(30.dp).clip(RoundedCornerShape(10.dp)).background(c.tint), contentAlignment = Alignment.Center) {
-                            androidx.compose.material3.Icon(item.icon, null, tint = c.text, modifier = Modifier.size(16.dp))
+                        Box(Modifier.size(32.dp).clip(RoundedCornerShape(11.dp)).background(if (here) c.accent else c.tint), contentAlignment = Alignment.Center) {
+                            androidx.compose.material3.Icon(item.icon, null, tint = if (here) c.onAccent else c.text, modifier = Modifier.size(17.dp))
                         }
-                        Text(item.label, Modifier.weight(1f), style = T.title.copy(fontSize = 15.sp), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(item.label, Modifier.weight(1f), style = T.title.copy(fontSize = 15.sp, fontWeight = if (here) androidx.compose.ui.text.font.FontWeight.ExtraBold else androidx.compose.ui.text.font.FontWeight.Bold), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         item.badge?.let { b ->
                             Text(
                                 b,

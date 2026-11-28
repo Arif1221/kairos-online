@@ -74,11 +74,7 @@ private val SWATCHES = listOf(
 
 @Composable
 private fun Header(title: String, onBack: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        CircleButton(Ic.Back, "Back", onBack, size = 44.dp)
-        Text(title, Modifier.weight(1f), style = T.title, color = P.colors.text, textAlign = TextAlign.Center)
-        Box(Modifier.size(44.dp))
-    }
+    com.skarif.kairos.ui.components.ScreenHeader(title, onBack)
 }
 
 /** A small heading that groups the cards below it (Appearance, Music, Library and data, About). */
@@ -100,7 +96,7 @@ private fun SeekStyleTile(style: SeekStyle, selected: Boolean, motion: SeekMotio
         modifier
             .clip(shape)
             .background(if (selected) c.tint else c.chip)
-            .border(if (selected) 2.dp else 1.dp, if (selected) c.accent else c.line.copy(alpha = 0.3f), shape)
+            .border(if (selected) 2.dp else 1.dp, if (selected) c.accent else c.hairline, shape)
             .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),

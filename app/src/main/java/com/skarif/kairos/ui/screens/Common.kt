@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.draggable
@@ -55,6 +56,7 @@ import com.skarif.kairos.data.ArtworkRepository
 import com.skarif.kairos.data.db.SongEntity
 import com.skarif.kairos.ui.MainViewModel
 import com.skarif.kairos.ui.components.ScreenBackground
+import com.skarif.kairos.ui.components.cardSurface
 import com.skarif.kairos.ui.components.KairosDialog
 import com.skarif.kairos.ui.components.Pill
 import com.skarif.kairos.ui.components.ActionSheet
@@ -490,7 +492,7 @@ fun NoticeBar(vm: MainViewModel, modifier: Modifier = Modifier) {
     val notice by vm.notice.collectAsStateWithLifecycle()
     val n = notice
     LaunchedEffect(n?.id) {
-        if (n != null) { kotlinx.coroutines.delay(if (n.undo != null) 6_000 else 4_000); vm.dismissNotice(n.id) }
+        if (n != null) { kotlinx.coroutines.delay(n.durationMs ?: if (n.undo != null) 6_000 else 4_000); vm.dismissNotice(n.id) }
     }
     androidx.compose.animation.AnimatedVisibility(
         n != null, modifier,
@@ -645,6 +647,41 @@ fun PageColumn(spacing: Dp = 18.dp, content: @Composable androidx.compose.founda
             verticalArrangement = Arrangement.spacedBy(spacing),
             content = content,
         )
+    }
+}
+
+/**
+ * A friendly empty state: a tinted icon, a title, one line of help and an optional action.
+ * Used where a list, search or tab has nothing to show, instead of a bare line of grey text.
+ */
+@Composable
+fun EmptyState(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    message: String,
+    modifier: Modifier = Modifier,
+    action: String? = null,
+    onAction: () -> Unit = {},
+    /** Side margin; pass 0.dp inside a container that already has the page margin. */
+    inset: Dp = 18.dp,
+) {
+    val c = P.colors
+    Column(
+        modifier.fillMaxWidth().padding(horizontal = inset, vertical = 8.dp)
+            .cardSurface(com.skarif.kairos.ui.theme.Radius.card)
+            .padding(horizontal = 20.dp, vertical = 26.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            Modifier.size(56.dp).clip(androidx.compose.foundation.shape.CircleShape).background(c.tint),
+            contentAlignment = Alignment.Center,
+        ) { Icon(icon, null, Modifier.size(26.dp), tint = c.accent) }
+        Text(title, style = T.title.copy(fontSize = 17.sp), color = c.text, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Text(message, style = T.small, color = c.muted, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        if (action != null) {
+            Box(Modifier.padding(top = 4.dp)) { Pill(action, onAction, accent = true) }
+        }
     }
 }
 

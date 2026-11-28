@@ -164,7 +164,7 @@ fun CircleButton(
             .pressScale(interaction)
             .clip(CircleShape)
             .background(bg)
-            .then(if (needsBorder) Modifier.border(1.dp, c.line.copy(alpha = if (c.dark) 0.30f else 0.20f), CircleShape) else Modifier)
+            .then(if (needsBorder) Modifier.border(1.dp, c.hairlineSoft, CircleShape) else Modifier)
             .clickable(interactionSource = interaction, indication = ripple(), role = Role.Button) { view.tick(); onClick() },
         contentAlignment = Alignment.Center,
     ) {
@@ -210,7 +210,7 @@ fun Pill(
             .pressScale(interaction, 0.96f)
             .clip(RoundedCornerShape(50))
             .background(bgA)
-            .then(if (!accent && !selected) Modifier.border(1.dp, c.line.copy(alpha = if (c.dark) 0.30f else 0.20f), RoundedCornerShape(50)) else Modifier)
+            .then(if (!accent && !selected) Modifier.border(1.dp, c.hairlineSoft, RoundedCornerShape(50)) else Modifier)
             .clickable(interactionSource = interaction, indication = ripple(), role = Role.Button) { view.tick(); onClick() }
             .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -230,8 +230,7 @@ fun Card(modifier: Modifier = Modifier, color: Color = P.colors.card, content: @
     Column(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
-            .background(color)
+            .cardSurface(com.skarif.kairos.ui.theme.Radius.card, color)
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
         content = content,
@@ -283,7 +282,7 @@ fun WaveformSeek(
             .fillMaxWidth()
             .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
             .background(c.card.copy(alpha = if (c.dark) 0.72f else 0.88f))
-            .border(1.dp, c.line.copy(alpha = if (c.dark) 0.35f else 0.25f), RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
+            .border(1.dp, c.hairline, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
             .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -390,7 +389,7 @@ fun ToggleRow(title: String, checked: Boolean, onChange: (Boolean) -> Unit, subt
             onCheckedChange = null,
             colors = SwitchDefaults.colors(
                 checkedTrackColor = c.accent, checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent,
-                uncheckedTrackColor = c.line, uncheckedThumbColor = Color.White, uncheckedBorderColor = Color.Transparent,
+                uncheckedTrackColor = c.chip, uncheckedThumbColor = c.muted, uncheckedBorderColor = c.line,
             ),
         )
     }
@@ -434,8 +433,8 @@ fun RadioCard(title: String, description: String, selected: Boolean, onClick: ()
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
-            .background(c.card)
-            .border(2.dp, if (selected) c.accent else Color.Transparent, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+            .background(if (selected) c.tint else c.card)
+            .border(if (selected) 2.dp else 1.dp, if (selected) c.accent else c.hairline, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
             .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -727,9 +726,9 @@ fun KairosDialog(
                     alpha = v.coerceIn(0f, 1f)
                 }
                 .heightIn(max = 620.dp)
-                .clip(RoundedCornerShape(30.dp)).background(containerColor)
+                .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card)).background(containerColor)
                 // The same hairline the cards and buttons have, so a popup reads as part of the app (more so in dark mode).
-                .border(1.dp, P.colors.line.copy(alpha = if (P.colors.dark) 0.30f else 0.20f), RoundedCornerShape(30.dp))
+                .border(1.dp, P.colors.hairlineSoft, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
                 .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {

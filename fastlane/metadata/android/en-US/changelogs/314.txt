@@ -1,5 +1,6 @@
 • Calmer colours: seek bar scenes stay close to the album colour, better album colour picking, two-colour background glow
-• Fix: a quick double tap no longer opens a page twice, goes back twice or runs a menu action twice
-• Smoother side menu, song menus, and opening and minimising the player
-• Playlists: sort, duplicate, remove duplicates; backups now include playlist covers
-• Player: redesigned cards under the controls, with animated lyrics
+• Fix: a quick double tap no longer opens a page twice or runs a menu action twice
+• Smoother side menu, song menus and player open/minimise
+• Playlists: sort, duplicate, remove duplicates; backups include covers
+• Player: redesigned cards, animated lyrics
+• Queue: autoplay refills early, radio avoids repeats

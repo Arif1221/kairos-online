@@ -105,7 +105,11 @@ data class GenreUi(val name: String, val songs: List<SongEntity>)
 data class LibraryHits(val songs: Set<Long>, val albums: Set<Long>, val artists: Set<String>, val genres: Set<String>)
 
 /** A short message at the bottom of the screen, with Undo when the action can be undone. */
-data class Notice(val text: String, val undo: (() -> Unit)? = null, val isError: Boolean = false, val id: Long = System.nanoTime())
+data class Notice(
+    val text: String, val undo: (() -> Unit)? = null, val isError: Boolean = false, val id: Long = System.nanoTime(),
+    /** How long it stays; null = the default (4 s, 6 s with Undo). */
+    val durationMs: Long? = null,
+)
 
 data class SearchHits(
     val artists: List<ArtistUi> = emptyList(),
@@ -787,6 +791,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private val videoWanted = MutableStateFlow(false)
+    private val _videoFellBack = MutableStateFlow(false)
+    /** Video was chosen but this song has none (or the check failed): the player went back to the sound, and says so. */
+    val videoFellBack: StateFlow<Boolean> = _videoFellBack.asStateFlow()
     val wantsVideo: StateFlow<Boolean> = videoWanted.asStateFlow()
 
     // Remember the user's Song/Video choice while the full player is minimized. The active
@@ -800,6 +807,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var minimizeVideoGraceJob: kotlinx.coroutines.Job? = null
     /** The song whose video already got its one automatic retry after an error. */
     private var videoRetriedFor: Long? = null
+    /** The "slow connection" notice on screen, so it can be removed when playback recovers. */
+    private var slowNoticeId: Long? = null
 
     /** Search again for [song]'s video, also when an earlier search found nothing (that answer is cached for a day). */
     fun retryVideoCheck(song: SongEntity? = null) {
@@ -902,10 +911,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             now.map { it.songId }.filterNotNull().distinctUntilChanged().collect {
                 videoRetriedFor = null
+                _videoFellBack.value = false
                 // Only with the player open: a new song while minimised starts as plain sound (no
                 // picture to prepare); the Video choice comes back when the player is opened.
                 if (playerOpen.value) ct.player.setVideoRendering(true)
                 videoWanted.value = playerOpen.value && videoPreferred.value
+            }
+        }
+        // Video is chosen but this song has no video (or the lookup failed): go back to the sound right away
+        // instead of sitting on an empty picture. The choice itself is kept, so the next song that has a
+        // video comes back as video, and "Find video" (or a retry that succeeds) brings this one back.
+        viewModelScope.launch {
+            videoState.collect { st ->
+                when (st) {
+                    is VideoState.Unavailable, is VideoState.Error ->
+                        if (videoWanted.value && playerOpen.value) { videoWanted.value = false; _videoFellBack.value = true }
+                    is VideoState.Available ->
+                        if (_videoFellBack.value && playerOpen.value && videoPreferred.value) { _videoFellBack.value = false; videoWanted.value = true }
+                    else -> {}
+                }
             }
         }
         ct.player.onVideoError = { why ->
@@ -923,11 +947,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (playerOpen.value && videoPreferred.value && now.value.songId == sid) videoWanted.value = true
                 }
             } else {
-                if (videoWanted.value) notify("Couldn't play video ($why) — playing audio", isError = true)
+                if (videoWanted.value) notify("Couldn't play video: $why · Playing audio instead", isError = true)
                 // Keep the preference, but stop retrying this track in a tight loop. The next track
                 // change re-arms videoWanted and can resume video if that track has a valid match.
                 videoWanted.value = false
             }
+        }
+        // Slow or dropped network while streaming: the same notice for a song and a video, shown
+        // while it lasts and taken away as soon as playback is running again.
+        ct.player.onSlowNetwork = { video ->
+            val what = if (video) "video" else "song"
+            if (!onlineUi.networkUp.value) notify("You're offline. The $what will carry on when you reconnect.", isError = true, durationMs = 10_000)
+            else notify("Slow connection: the $what is still loading…", durationMs = 10_000)
+            slowNoticeId = _notice.value?.id
+        }
+        ct.player.onNetworkRecovered = {
+            slowNoticeId?.let { dismissNotice(it) }
+            slowNoticeId = null
         }
         ct.player.onPlaybackError = { title, why, skipped ->
             val prefix = if (!title.isNullOrBlank()) "Couldn't play \"$title\"" else "Couldn't play song"
@@ -1011,7 +1047,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 notify("Loading ${song.title} radio…")
             }
             viewModelScope.launch {
-                val more = onlineUi.radio(song).filter { it.id != song.id }
+                val playedIds = if (alreadyPlaying) now.value.queue.take(now.value.queuePosition + 1).map { it.songId }.toSet() else emptySet()
+                val more = onlineUi.radio(song).filter { it.id != song.id && it.id !in playedIds }
                 if (more.isEmpty()) {
                     notify(if (onlineUi.networkUp.value) "Couldn't load radio for ${song.title}" else "Radio needs a connection")
                 } else if (now.value.songId == song.id) {
@@ -1023,7 +1060,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             return
         }
-        val more = similarSongs(listOf(song), songs.value, historyFlow.value.taste, 50, kotlin.random.Random.Default, blocked.value, drift = true)
+        val queuedIds = if (alreadyPlaying) now.value.queue.map { it.songId }.toSet() else emptySet()
+        val more = similarSongs(listOf(song), songs.value, historyFlow.value.taste, 50, kotlin.random.Random.Default, blocked.value + queuedIds, drift = true)
         if (alreadyPlaying) {
             _playingFrom.value = "${song.title} radio"
             ct.player.clearUpcoming()
@@ -1190,7 +1228,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _notice = MutableStateFlow<Notice?>(null)
     val notice: StateFlow<Notice?> = _notice.asStateFlow()
-    fun notify(text: String, isError: Boolean = false, undo: (() -> Unit)? = null) { _notice.value = Notice(text, undo, isError) }
+    fun notify(text: String, isError: Boolean = false, durationMs: Long? = null, undo: (() -> Unit)? = null) { _notice.value = Notice(text, undo, isError, durationMs = durationMs) }
     fun dismissNotice(id: Long) { if (_notice.value?.id == id) _notice.value = null }
 
     private suspend fun toast(text: String) = kotlinx.coroutines.withContext(Dispatchers.Main) { notify(text) }
@@ -1232,7 +1270,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun clearPlayed() { ct.player.clearPlayed() }
     fun toggleShuffle() { ct.player.toggleShuffle() }
-    fun reshuffle() { if (ct.player.reshuffleUpcoming()) notify("Shuffled what's coming up") }
+    fun reshuffle() {
+        val n = now.value
+        val upcoming = n.queue.drop(n.queuePosition + 1).mapNotNull { songById.value[it.songId] }
+        val ok = if (!n.shuffle && upcoming.size >= 3 && upcoming.size == n.queue.size - n.queuePosition - 1) ct.player.replaceUpcoming(spreadShuffle(upcoming, kotlin.random.Random.Default)) else ct.player.reshuffleUpcoming()
+        if (ok) notify("Shuffled what's coming up")
+    }
     fun cycleRepeat() { ct.player.cycleRepeat() }
     fun song(id: Long): SongEntity? = songById.value[id]
 
@@ -1439,9 +1482,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             while (true) { kotlinx.coroutines.delay(10_000); if (now.value.isPlaying) saveQueue() }
         }
-        // Autoplay: when the last song in the queue starts, add similar songs from your library.
+        // Autoplay: when the queue is down to its last two songs, top it up (before the end, so there is never a gap).
         viewModelScope.launch {
-            combine(now, ct.player.filling) { n, f -> Triple(n.songId, n.queuePosition == n.queue.lastIndex && !f, n.repeatMode) }.distinctUntilChanged().collect { (id, last, repeat) ->
+            combine(now, ct.player.filling) { n, f -> Triple(n.queue.lastOrNull()?.songId, n.queue.isNotEmpty() && n.queuePosition >= n.queue.lastIndex - 1 && !f, n.repeatMode) }.distinctUntilChanged().collect { (id, last, repeat) ->
                 if (id == null || !last || repeat != androidx.media3.common.Player.REPEAT_MODE_OFF || !settings.value.autoplay) return@collect
                 // A long queue is still being added; the "last" song isn't really the last.
                 if (ct.player.filling.value) return@collect
@@ -1452,12 +1495,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val lastSong = queued.lastOrNull()
                 if (lastSong != null && lastSong.isOnline) {
                     val inQueue = queued.mapTo(HashSet()) { it.id }
-                    val online = onlineUi.radio(lastSong).filter { it.id !in inQueue && it.id !in blocked.value }.take(10)
+                    val online = onlineUi.radio(lastSong).filter { it.id !in inQueue && it.id !in blocked.value }.take(15)
                     if (online.isNotEmpty()) { keepOnline(online); ct.player.append(online) }
                     return@collect
                 }
                 val more = kotlinx.coroutines.withContext(Dispatchers.Default) {
-                    similarSongs(queued.takeLast(10), songs.value, historyFlow.value.taste, 10, kotlin.random.Random.Default, blocked.value + queued.map { it.id }, drift = true)
+                    similarSongs(queued.takeLast(10), songs.value, historyFlow.value.taste, 15, kotlin.random.Random.Default, blocked.value + queued.map { it.id }, drift = true)
                 }
                 ct.player.append(more)
             }

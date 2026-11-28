@@ -61,6 +61,12 @@ data class PlayerColors(
 ) {
     /** A soft wash of the accent, used for backgrounds and icon circles. */
     val tint: Color get() = lerp(card, accent, 0.2f)
+    /** The one hairline for cards, tiles, rows and panels. */
+    val hairline: Color get() = line.copy(alpha = if (dark) 0.45f else 0.30f)
+    /** A lighter hairline for small controls (round buttons, pills, fields) so they don't look boxed in. */
+    val hairlineSoft: Color get() = line.copy(alpha = if (dark) 0.30f else 0.20f)
+    /** Cards that sit on the page: a touch see-through, so the cover's colour glows at the edges. */
+    val cardSoft: Color get() = card.copy(alpha = if (dark) 0.85f else 0.92f)
 }
 
 val LocalPlayerColors = staticCompositionLocalOf<PlayerColors> { error("PlayerTheme missing") }

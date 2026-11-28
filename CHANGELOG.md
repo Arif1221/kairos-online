@@ -2,7 +2,26 @@
 
 ## Unreleased
 
+## Online 0.9.3.5
+
+- Playback: a streamed song or video that keeps buffering for 5 seconds now shows a "Slow connection" note (or "You're offline" when there is no connection). Songs and videos are watched the same way, the note stays up while it lasts and goes away as soon as playback runs again, and it shows at most once every 30 seconds. A video that is still stuck after 15 seconds takes the usual path: one quiet retry, then back to the sound
+- Playback: failure messages read the same for audio and video ("Couldn't play ...: reason · Skipping" / "· Playing audio instead")
+- Look: one set of design values for the whole app. Cards, tiles and rows share one hairline outline, one card fill and the same corner radii, Settings and Music folders use the same back header as the other pages, and page margins are 18 dp everywhere
+- Home: a new install with no music shows a "No music yet" card with an Open library button; the Continue listening progress no longer overflows on albums longer than 12 songs; Rediscover ends in a round play button
+- Library: Play by colour has full-size tap targets and its label on its own line
+- Search: tap anywhere on the search box to type, the keyboard has a Search key, and the box has a hairline outline. "No results" and "No genres" are proper cards
+- Statistics: an Overview label, share bars under Top songs (like Top artists), and a friendly card instead of a grid of zeros when nothing was played in the period
+- Side menu: the page you are on is highlighted, and rows are a little taller
+- Playlists, album, artist and genre pages: hairline outlines on playlist tiles, a stronger gradient behind the title on bright covers, the smart shuffle button matches the pills, and empty playlists and genres show a hint
+- Settings: switches are visible when off (they were a white thumb on a faint track), option cards show a clear selected state, and cards have the same hairline as the rest of the app
+- Onboarding: cards have the hairline outline, Skip has a bigger tap area, and the step dots are announced to screen readers
+- Player: the mini player's heart and next buttons are bigger (42 dp)
+- Code: shared building blocks (`cardSurface`, `SectionTitle`, `ShareBar`, `EmptyState`, `OnTabReselected`) replace copies in many screens
+
 ## Online 0.9.3.4
+
+- Queue: autoplay tops up two songs before the end (no gap), 15 at a time; radio no longer repeats songs already queued or played; shake/reshuffle spreads artists instead of pure random.
+- Video: with Video chosen, a song that has no video (or whose check failed) no longer sits on an empty picture. The player goes back to the sound right away, the toggle returns to Audio with Video dimmed, and a small note fades in ("No video for this song" with a Find video button) and fades out after a few seconds. Your Video choice is kept, so the next song with a video plays as video again, and finding or retrying a video for this song brings it back
 - Updater: the download shows a smooth progress bar (it glides instead of stepping in 20 blocks) with the percentage and "12.4 of 41.0 MB", a sweeping bar while it installs, and a tidier popup with an icon and bullet points
 - Popups have the same hairline outline as cards and buttons, and a button whose label changes (such as "Scan again" to "Scanning…") fades between the two
 - Look: the seek bar's borders are quieter in both themes: a hairline pill outline instead of a bright ring, a thinner and softer line along the played wave, and a fainter ring on the knob

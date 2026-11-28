@@ -280,7 +280,7 @@ private fun InfoCard(
     Column(
         Modifier.fillMaxWidth().clip(shape)
             .background(if (tinted) androidx.compose.ui.graphics.lerp(c.card, c.accent, if (c.dark) 0.12f else 0.09f) else c.card)
-            .border(1.dp, c.line.copy(alpha = if (c.dark) 0.30f else 0.20f), shape)
+            .border(1.dp, c.hairlineSoft, shape)
             .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
             .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),

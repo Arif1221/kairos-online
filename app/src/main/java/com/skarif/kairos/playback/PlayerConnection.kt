@@ -54,6 +54,13 @@ data class NowPlaying(
 /** Uri scheme of an online video; the online flavor's data source plays it with its picture. */
 const val VIDEO_SCHEME = "kairos-ytv"
 
+/** A streamed song or video that has been buffering this long gets a "slow connection" notice. */
+private const val SLOW_AFTER_MS = 5_000L
+/** At most one such notice per this long, so a flaky network doesn't flood the screen. */
+private const val SLOW_COOLDOWN_MS = 30_000L
+/** A video that still hasn't recovered after this long is given up on (the app falls back to the sound). */
+private const val VIDEO_GIVE_UP_MS = 15_000L
+
 /** [index] is the player's media item index; [songId] the song. */
 data class QueueEntry(
     val index: Int,
@@ -88,6 +95,19 @@ class PlayerConnection(private val context: Context, private val appScope: Corou
 
     /** Called when audio playback fails (with song title, human-readable reason, and whether it skipped). */
     @Volatile var onPlaybackError: (title: String?, reason: String, skipped: Boolean) -> Unit = { _, _, _ -> }
+
+    /**
+     * Called once when a streamed song or video has been stuck buffering for a while; [video] says
+     * which. Audio and video share this path so they warn the same way.
+     */
+    @Volatile var onSlowNetwork: (video: Boolean) -> Unit = {}
+
+    /** Called when playback runs again after [onSlowNetwork] was shown. */
+    @Volatile var onNetworkRecovered: () -> Unit = {}
+
+    private var stallJob: Job? = null
+    private var lastSlowAt = -SLOW_COOLDOWN_MS
+    private var slowShown = false
 
     private var lastAudioErrorId: String? = null
 
@@ -141,7 +161,12 @@ class PlayerConnection(private val context: Context, private val appScope: Corou
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     if (isPlaying) lastAudioErrorId = null
                 }
+                override fun onPlaybackStateChanged(playbackState: Int) = watchBuffering(c)
+                override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = watchBuffering(c)
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    // A new item restarts the clock: its own stall is judged on its own.
+                    stallJob?.cancel(); stallJob = null; slowShown = false
+                    watchBuffering(c)
                     if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) transitionListeners.toList().forEach { it() }
                 }
             })
@@ -157,6 +182,34 @@ class PlayerConnection(private val context: Context, private val appScope: Corou
      */
     private fun MediaController.current(): MediaItem? =
         currentMediaItem ?: if (currentMediaItemIndex in 0 until mediaItemCount) getMediaItemAt(currentMediaItemIndex) else null
+
+    /**
+     * Watches for a streamed song or video that wants to play but keeps buffering. After
+     * [SLOW_AFTER_MS] it reports [onSlowNetwork]; a video that is still stuck at [VIDEO_GIVE_UP_MS]
+     * is reported as a video error, so it takes the same retry-then-fall-back path as any other.
+     * Local files are never watched: they don't wait on a network.
+     */
+    private fun watchBuffering(c: MediaController) {
+        val cur = c.current()
+        val video = isVideoItem(cur)
+        val streamed = video || (cur?.mediaId?.toLongOrNull() ?: 0L) < 0
+        val stalled = streamed && c.playWhenReady && c.playbackState == Player.STATE_BUFFERING
+        if (!stalled) {
+            stallJob?.cancel(); stallJob = null
+            if (slowShown && c.playbackState == Player.STATE_READY) { slowShown = false; onNetworkRecovered() }
+            return
+        }
+        if (stallJob?.isActive == true) return
+        stallJob = appScope.launch(Dispatchers.Main) {
+            delay(SLOW_AFTER_MS)
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastSlowAt >= SLOW_COOLDOWN_MS) { lastSlowAt = now; slowShown = true; onSlowNetwork(video) }
+            if (video) {
+                delay(VIDEO_GIVE_UP_MS - SLOW_AFTER_MS)
+                onVideoError("Slow connection")
+            }
+        }
+    }
 
     private fun isVideoItem(item: MediaItem?) = item?.requestMetadata?.mediaUri?.scheme == VIDEO_SCHEME
 
@@ -374,6 +427,16 @@ class PlayerConnection(private val context: Context, private val appScope: Corou
         val rest = (cur + 1 until n).map { c.getMediaItemAt(it) }.shuffled()
         c.removeMediaItems(cur + 1, n)
         c.addMediaItems(rest)
+        return true
+    }
+    /** Swaps everything after the current song for [songs] (an already-ordered list), as one remove and one add. */
+    fun replaceUpcoming(songs: List<SongEntity>): Boolean {
+        val c = controller ?: return false
+        if (filling.value || songs.size < 2) return false
+        if (c.shuffleModeEnabled) c.shuffleModeEnabled = false
+        val cur = c.currentMediaItemIndex
+        c.removeMediaItems(cur + 1, c.mediaItemCount)
+        c.addMediaItems(songs.map { it.toMediaItem() })
         return true
     }
     fun cycleRepeat() = controller?.run {

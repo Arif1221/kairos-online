@@ -743,10 +743,10 @@ private fun MiniContent(vm: MainViewModel, ctrl: PlayerController, songId: Long,
                 if (liked) Ic.HeartFilled else Ic.Heart,
                 if (liked) "Remove from favourites" else "Add to favourites",
                 { vm.toggleFavorite(songId) },
-                size = 38.dp, container = Color.Transparent, content = if (liked) c.accent else c.text,
+                size = 42.dp, container = Color.Transparent, content = if (liked) c.accent else c.text,
             )
             CircleButton(if (playing) Ic.Pause else Ic.Play, if (playing) "Pause" else "Play", vm::toggle, size = 46.dp, container = c.ink, content = c.inkFg)
-            CircleButton(Ic.Next, "Next song", vm::next, size = 38.dp, container = Color.Transparent)
+            CircleButton(Ic.Next, "Next song", vm::next, size = 42.dp, container = Color.Transparent)
         }
     }
 }

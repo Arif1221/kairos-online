@@ -152,7 +152,7 @@ fun ActionSheet(
                     .padding(horizontal = 8.dp, vertical = 8.dp)
                     .heightIn(max = maxH)
                     .graphicsLayer { translationY = (1f - shown.value) * (size.height + 40.dp.toPx()) + drag.value }
-                    .clip(RoundedCornerShape(30.dp))
+                    .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
                     .background(c.sheet)
                     // Pull down on the header to close; the list below scrolls as usual.
                     .draggable(

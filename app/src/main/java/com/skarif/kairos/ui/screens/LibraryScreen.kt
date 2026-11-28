@@ -1,5 +1,6 @@
 package com.skarif.kairos.ui.screens
 
+import com.skarif.kairos.ui.components.cardSurface
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -189,9 +190,7 @@ fun LibraryScreen(
     val soft = c.muted
 
     val band = com.skarif.kairos.ui.motion.rememberRubberBand()
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        vm.tabReselected.collect { if (it == "library") grid.animateScrollToItem(0) }
-    }
+    com.skarif.kairos.ui.components.OnTabReselected(vm, "library") { grid.animateScrollToItem(0) }
 
     ScreenBackground {
         LazyVerticalGrid(
@@ -238,7 +237,7 @@ fun LibraryScreen(
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
                             .background(chipCol)
-                            .border(1.dp, c.line.copy(alpha = if (c.dark) 0.30f else 0.20f), RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+                            .border(1.dp, c.hairlineSoft, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
                             .padding(4.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
@@ -291,26 +290,30 @@ fun LibraryScreen(
             }
             // Mood by colour: shuffle songs whose cover is mostly this colour.
             if (tab == LibTab.SONGS) item(span = { GridItemSpan(2) }, key = "colours") {
-                val hairline = c.line.copy(alpha = if (c.dark) 0.45f else 0.30f)
-                Row(
+                val hairline = c.hairline
+                Column(
                     Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 4.dp, bottom = 8.dp)
                         .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
                         .background(c.card.copy(alpha = if (c.dark) 0.80f else 0.90f))
                         .border(1.dp, hairline, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    Text("PLAY BY COLOUR", Modifier.weight(1f), style = T.kicker, color = c.muted)
-                    com.skarif.kairos.data.CoverColour.entries.forEach { col ->
-                        Box(
-                            Modifier.size(24.dp).clip(CircleShape).background(Color(col.swatch))
-                                .border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape)
-                                .clickable(role = Role.Button, onClickLabel = "Shuffle ${col.label.lowercase()} covers") {
-                                    // The player stays closed: it may take a moment, or there may be too few.
-                                    vm.playByColour(col)
-                                },
-                        )
+                    Text("PLAY BY COLOUR", style = T.kicker, color = c.muted)
+                    // Seven equal slots: each is a full-height tap target, the dot inside stays small.
+                    Row(Modifier.fillMaxWidth()) {
+                        com.skarif.kairos.data.CoverColour.entries.forEach { col ->
+                            Box(
+                                Modifier.weight(1f).height(44.dp)
+                                    .clickable(role = Role.Button, onClickLabel = "Shuffle ${col.label.lowercase()} covers") {
+                                        // The player stays closed: it may take a moment, or there may be too few.
+                                        vm.playByColour(col)
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Box(Modifier.size(28.dp).clip(CircleShape).background(Color(col.swatch)).border(1.dp, Color.White.copy(alpha = 0.25f), CircleShape))
+                            }
+                        }
                     }
                 }
             }
@@ -318,7 +321,9 @@ fun LibraryScreen(
             when (tab) {
                 LibTab.SONGS -> {
                     if (shownSongs.isEmpty() && filter.isNotBlank()) {
-                        item(span = { GridItemSpan(2) }) { Text("Nothing matches \"$filter\".", Modifier.padding(18.dp), style = T.body, color = c.muted) }
+                        item(span = { GridItemSpan(2) }) {
+                            EmptyState(Ic.Search, "Nothing matches \"$filter\"", "Try fewer words. Accents and capitals don't matter.")
+                        }
                     } else if (shownSongs.isEmpty()) {
                         item(span = { GridItemSpan(2) }) {
                             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -517,7 +522,7 @@ private fun YoursTiles(vm: MainViewModel, onOpenCollection: (String) -> Unit, on
         Triple(Ic.DownArrow, "Downloads", "${downloads.size} songs") to onDownloads,
         Triple(Ic.Clock, "Recently played", "$recent songs") to { onOpenCollection("lastplayed") },
     )
-    val hairline = c.line.copy(alpha = if (c.dark) 0.45f else 0.30f)
+    val hairline = c.hairline
     Column(Modifier.padding(start = 18.dp, end = 18.dp, top = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         tiles.chunked(2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -525,9 +530,7 @@ private fun YoursTiles(vm: MainViewModel, onOpenCollection: (String) -> Unit, on
                     val (icon, label, count) = t
                     Row(
                         Modifier.weight(1f).cardClick("Open $label", onClick = go)
-                            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
-                            .background(c.card.copy(alpha = if (c.dark) 0.85f else 0.92f))
-                            .border(1.dp, hairline, RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+                            .cardSurface(com.skarif.kairos.ui.theme.Radius.item)
                             .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),

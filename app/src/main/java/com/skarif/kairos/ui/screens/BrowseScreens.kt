@@ -1,5 +1,6 @@
 package com.skarif.kairos.ui.screens
 
+import com.skarif.kairos.ui.components.cardSurface
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -43,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -80,16 +82,24 @@ fun SearchField(
     container: Color = P.colors.card, height: androidx.compose.ui.unit.Dp = 60.dp,
 ) {
     val c = P.colors
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     Row(
-        modifier.fillMaxWidth().height(height).clip(RoundedCornerShape(height / 2)).background(container).padding(start = 20.dp, end = 8.dp),
+        modifier.fillMaxWidth().height(height).clip(RoundedCornerShape(height / 2)).background(container)
+            .border(1.dp, c.hairlineSoft, RoundedCornerShape(height / 2))
+            // Tapping anywhere on the pill (not just the text) starts typing.
+            .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { focus.requestFocus() }
+            .padding(start = 20.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Box(Modifier.weight(1f)) {
             if (value.isEmpty()) Text(placeholder, style = T.body.copy(fontSize = 16.sp), color = c.muted)
             BasicTextField(
-                value, onChange, Modifier.fillMaxWidth().semantics { contentDescription = placeholder },
-                singleLine = true, textStyle = T.body.copy(fontSize = 16.sp, color = c.text), cursorBrush = SolidColor(c.accent),
+                value, onChange, Modifier.fillMaxWidth().withFocusRequester(focus).semantics { contentDescription = placeholder },
+                singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { focusManager.clearFocus() }), textStyle = T.body.copy(fontSize = 16.sp, color = c.text), cursorBrush = SolidColor(c.accent),
             )
         }
         if (value.isNotEmpty()) CircleButton(Ic.Close, "Clear", { onChange("") }, size = height - 16.dp, container = c.tint)
@@ -98,6 +108,9 @@ fun SearchField(
         }
     }
 }
+
+private fun Modifier.withFocusRequester(r: androidx.compose.ui.focus.FocusRequester): Modifier =
+    this.then(Modifier.focusRequester(r))
 
 /**
  * Search. Typing shows matching artists, albums, genres and songs together; with nothing typed,
@@ -135,9 +148,7 @@ fun SearchScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenCollection: (Strin
     val searchGrid = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     val band = com.skarif.kairos.ui.motion.rememberRubberBand()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        vm.tabReselected.collect { if (it == "search") searchGrid.animateScrollToItem(0) }
-    }
+    com.skarif.kairos.ui.components.OnTabReselected(vm, "search") { searchGrid.animateScrollToItem(0) }
     val pastTitle by remember { androidx.compose.runtime.derivedStateOf { searchGrid.firstVisibleItemIndex > 0 } }
 
     ScreenBackground {
@@ -238,7 +249,9 @@ fun SearchScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenCollection: (Strin
             } else if (q.isNotEmpty()) {
                 val nothing = results.isEmpty() && hits.artists.isEmpty() && hits.albums.isEmpty() && hits.genres.isEmpty()
                 if (nothing) {
-                    item(span = { GridItemSpan(2) }) { Text("Nothing matches \"$q\".", Modifier.padding(horizontal = 18.dp, vertical = 8.dp), style = T.body, color = c.muted) }
+                    item(span = { GridItemSpan(2) }) {
+                        EmptyState(Ic.Search, "No results for \"$q\"", "Check the spelling, or try an artist, album or genre instead.")
+                    }
                 }
                 if (hits.artists.isNotEmpty()) {
                     item(span = { GridItemSpan(2) }, key = "h-artists") { SearchSection("Artists") }
@@ -298,7 +311,9 @@ fun SearchScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenCollection: (Strin
                     else -> genres.map { Quad(it.songs.first(), "genre:${it.name}", "${it.songs.size} songs", it.name) }
                 }
                 if (list.isEmpty() && tab == 2) {
-                    item(span = { GridItemSpan(2) }) { Text("No genre tags found in your music.", Modifier.padding(horizontal = 18.dp), style = T.body, color = c.muted) }
+                    item(span = { GridItemSpan(2) }) {
+                        EmptyState(Ic.Wave, "No genres yet", "Your songs don't carry genre tags. Albums and artists still work.")
+                    }
                 }
                 gridItemsIndexed(list, key = { _, t -> t.key }, contentType = { _, _ -> "tile" }) { i, t ->
                     // Same edge spacing as the Library's album grid.
@@ -314,7 +329,7 @@ fun SearchScreen(vm: MainViewModel, onMenu: () -> Unit, onOpenCollection: (Strin
 
 @Composable
 private fun SearchSection(title: String) {
-    Text(title, Modifier.padding(start = 18.dp, end = 18.dp, top = 8.dp), style = T.h2, color = P.colors.text)
+    com.skarif.kairos.ui.components.SectionTitle(title, Modifier.padding(top = 8.dp))
 }
 
 /** Cover card that grows into the album/artist page when tapped. */
@@ -386,17 +401,17 @@ fun PlaylistsScreen(vm: MainViewModel, onBack: () -> Unit, onNew: () -> Unit, on
                     }
                     Text(mixedHeadline("Your " to false, "playlists" to true, ", made " to false, "your way" to true), Modifier.stretchTitle { band.pull }, style = T.h1, color = c.text)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Pill("Made by you  ${playlists.size + 1}", { smart = false }, selected = !smart)
+                        Pill("Made by you  ${tiles.size.takeIf { !smart } ?: (playlists.size + 1)}", { smart = false }, selected = !smart)
                         Pill("Smart  ${mixes.size}", { smart = true }, selected = smart)
                     }
-                    if (tiles.isEmpty()) Text("No playlists yet. Tap New playlist to make one.", style = T.body, color = c.muted)
+                    if (tiles.isEmpty()) EmptyState(Ic.PlaylistAdd, "No playlists yet", "Tap New to make one, or import an .m3u file.", inset = 0.dp, action = "New playlist", onAction = onNew)
                 }
             }
             items(tiles, key = { it.key }, contentType = { "playlist" }) { t ->
                 Column(
                     Modifier.sharedCard("col-${t.key}", RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
                         .cardClick("Open ${t.name}", onLongClick = { menu(t.key) }) { onOpenCollection(t.key) }
-                        .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card)).background(c.card)
+                        .cardSurface(com.skarif.kairos.ui.theme.Radius.card, c.card)
                         .padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
@@ -648,7 +663,7 @@ fun CollectionScreen(
                             if (isAlbum && cover != null) Image(cover, "${col?.title} cover", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
                             else PlaylistArt(vm, key, col?.songs.orEmpty(), Modifier.fillMaxSize(), corner = 0.dp)
                         }
-                        Box(Modifier.fillMaxWidth().height(200.dp).align(Alignment.BottomCenter).background(Brush.verticalGradient(listOf(Color.Transparent, Color(0x99000000)))))
+                        Box(Modifier.fillMaxWidth().height(240.dp).align(Alignment.BottomCenter).background(Brush.verticalGradient(listOf(Color.Transparent, Color(0x73000000), Color(0xB3000000)))))
                         Row(
                             Modifier.fillMaxWidth()
                                 // Undo the stretch for the buttons, so they keep their size and place.
@@ -678,7 +693,7 @@ fun CollectionScreen(
                                 )
                             }
                             Text(col?.title ?: "Not found", style = T.big.copy(fontSize = 38.sp, lineHeight = 40.sp), color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(col?.subtitle ?: "", style = T.small, color = Color.White)
+                            Text(col?.subtitle ?: "", style = T.small, color = Color.White.copy(alpha = 0.85f))
                         }
                     }
                     CircleButton(
@@ -698,7 +713,7 @@ fun CollectionScreen(
                     // Smart Shuffle: mixes in a suggestion from your library every few songs.
                     CircleButton(
                         Ic.Wave, if (settings.smartShuffle) "Smart shuffle, on" else "Smart shuffle, off",
-                        { vm.updateSettings { it.copy(smartShuffle = !it.smartShuffle) } }, size = 52.dp,
+                        { vm.updateSettings { it.copy(smartShuffle = !it.smartShuffle) } }, size = 60.dp,
                         container = if (settings.smartShuffle) c.accent else c.card, content = if (settings.smartShuffle) c.onAccent else c.text,
                     )
                 }
@@ -762,6 +777,13 @@ fun CollectionScreen(
                 }
                 if (list.isNotEmpty()) item { PageSection("All songs") }
             }
+            if (list.isEmpty() && col != null) item {
+                EmptyState(
+                    if (pid != null) Ic.PlaylistAdd else Ic.Music,
+                    if (genreFilter != null) "No songs in $genreFilter" else if (pid != null) "This playlist is empty" else "No songs here",
+                    if (pid != null) "Hold any song in your library and choose Add to playlist." else "Songs will appear here once they're in your library.",
+                )
+            }
             if (list.isNotEmpty()) {
                 itemsIndexed(list, key = { i, s -> "$i-${s.id}" }, contentType = { _, _ -> "song" }) { i, s ->
                     // The first screenful of songs rises in one after another when the page opens.
@@ -779,7 +801,7 @@ fun CollectionScreen(
 
 @Composable
 private fun PageSection(title: String) {
-    Text(title, Modifier.padding(start = 22.dp, end = 22.dp, top = 18.dp, bottom = 8.dp), style = T.h2, color = P.colors.text)
+    com.skarif.kairos.ui.components.SectionTitle(title, Modifier.padding(top = 18.dp, bottom = 8.dp))
 }
 
 private data class Quad(val song: SongEntity, val key: String, val kicker: String, val title: String)

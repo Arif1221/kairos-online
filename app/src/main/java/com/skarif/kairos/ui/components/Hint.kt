@@ -44,7 +44,7 @@ fun HintCard(key: String, title: String, lines: List<String>, modifier: Modifier
     if (!shown) return
     val c = P.colors
     Row(
-        modifier.fillMaxWidth().padding(horizontal = inset).clip(RoundedCornerShape(22.dp)).background(c.card).padding(16.dp),
+        modifier.fillMaxWidth().padding(horizontal = inset).clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)).background(c.card).padding(16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Icon(Ic.Info, null, tint = c.accent, modifier = Modifier.size(22.dp))

@@ -496,7 +496,7 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
             )
 
             AnimatedVisibility(menuOpen, enter = fadeIn(Motion.fadeIn()) + slideInHorizontally(Motion.spatial()) { -it / 3 }, exit = fadeOut(Motion.fadeOut()) + slideOutHorizontally(Motion.spatial()) { -it / 3 }) {
-                MenuDrawer(vm, onClose = { menuOpen = false }) { r ->
+                MenuDrawer(vm, current = route, onClose = { menuOpen = false }) { r ->
                     menuOpen = false
                     when (r) {
                         "now" -> if (song != null) player.expand() else vm.notify("Play a song first")

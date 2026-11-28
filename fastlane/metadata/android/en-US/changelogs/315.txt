@@ -1,0 +1,4 @@
+• Slow-connection note when a song or video keeps buffering, the same for audio and video
+• One consistent look: shared outlines, cards, corners and spacing across every page
+• Clearer Home, Library, Search, Statistics and side menu (current page highlighted)
+• Friendly empty states, visible switches, bigger tap targets
