@@ -76,9 +76,6 @@ fun VideoLayer(vm: MainViewModel, fill: Boolean, showSubtitles: Boolean = true, 
     val revealVideo = firstFrame || (active && waited)
     val fade by animateFloatAsState(if (revealVideo) 1f else 0f, tween(250), label = "videoFade")
 
-    LaunchedEffect(active, firstFrame, waited, fade > 0.5f, size.width, size.height) {
-        android.util.Log.i("KairosVideo", "UI layer: active=$active firstFrame=$firstFrame waited=$waited reveal=$revealVideo visible=${fade > 0.5f} size=${size.width}x${size.height} fill=$fill")
-    }
 
     // The screen stays on while the picture moves, and no longer.
     val view = LocalView.current
@@ -107,9 +104,12 @@ fun VideoLayer(vm: MainViewModel, fill: Boolean, showSubtitles: Boolean = true, 
         }
         // With Fill the picture covers the whole cover, so the blur would never be seen.
         if (fill) return@LaunchedEffect
+        // One 72 px bitmap reused for every read: getBitmap runs on the UI thread, so it should not
+        // also allocate each time. It is only read again after the blur has finished with it.
+        val buffer = android.graphics.Bitmap.createBitmap(72, 72, android.graphics.Bitmap.Config.ARGB_8888)
         do {
             if (texture.isAvailable && texture.width > 0 && texture.height > 0) {
-                val frame = runCatching { texture.getBitmap(72, 72) }.getOrNull()
+                val frame = runCatching { texture.getBitmap(buffer) }.getOrNull()
                 if (frame != null) {
                     val blurred = try {
                         withContext(Dispatchers.Default) { blurredTiny(frame, side = 72, radius = 2) }
@@ -117,14 +117,14 @@ fun VideoLayer(vm: MainViewModel, fill: Boolean, showSubtitles: Boolean = true, 
                         throw e
                     } catch (_: Exception) {
                         null
-                    } finally {
-                        frame.recycle()
                     }
                     if (blurred != null) blurredFrame = blurred
                 }
             }
             if (!now.isPlaying) break
-            delay(1_200)
+            // The glow behind a fitted picture drifts slowly; every 2.5 s is enough (it was every 1.2 s,
+            // each one a synchronous read-back of the video texture on the UI thread).
+            delay(2_500)
         } while (true)
     }
 

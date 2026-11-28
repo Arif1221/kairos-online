@@ -66,7 +66,24 @@ class PlaybackService : MediaSessionService() {
         super.onCreate()
         val s = container.settings.settings.value
         builtWithFloat = s.outputMode != OutputMode.STANDARD
-        val player = ExoPlayer.Builder(this, DefaultRenderersFactory(this).setEnableAudioFloatOutput(builtWithFloat))
+        // Renderers: decoder fallback (a phone whose first VP9/AV1 decoder fails to start tries the next one
+        // instead of dropping to audio) and asynchronous codec queueing, which keeps frames flowing when
+        // the playback thread is busy (fewer dropped video frames).
+        val renderers = DefaultRenderersFactory(this)
+            .setEnableAudioFloatOutput(builtWithFloat)
+            .setEnableDecoderFallback(true)
+            .forceEnableMediaCodecAsynchronousQueueing()
+        // Buffering: the default target is sized for video (about 125 MB of memory), which means heap
+        // pressure and GC pauses during playback. A 1080p stream needs ~25 MB for 50 s, so 48 MB loses
+        // nothing for songs or video and cuts the memory. Playback also starts after 1.5 s of data
+        // (default 2.5 s) and resumes after a stall at 3.5 s (default 5 s).
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(50_000, 50_000, 1_500, 3_500)
+            .setTargetBufferBytes(48 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(false)
+            .build()
+        val player = ExoPlayer.Builder(this, renderers)
+            .setLoadControl(loadControl)
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(),
                 /* handleAudioFocus = */ true,

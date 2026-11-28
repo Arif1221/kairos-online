@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## Online 0.9.3.6
+
+- Smoother video: the player's buffer is capped at 48 MB (it was sized for about 125 MB of video), which means less memory use and fewer garbage-collection pauses during video; playback starts after 1.5 s of data and resumes after a stall at 3.5 s
+- Smoother video: asynchronous codec queueing for fewer dropped frames, and decoder fallback so a phone whose first video decoder fails to start tries the next one instead of dropping to audio
+- Smoother video: the soft glow behind a fitted picture reads the video every 2.5 s (was 1.2 s) into one reused bitmap, so the UI thread does less work while video plays
+- Fix: in the light theme the seek bar looked faded. The waves, the played part, its edge line, the outline and the knob were tuned for a dark sky and nearly vanished on the pale daytime one. They are stronger now (denser waves, a solid played fill with a 2 dp edge, a clearer outline, a knob with a ring and soft shadow, and deeper stars and petals); the dark theme is unchanged
+- Fix: the update popup with a long "What's new" list no longer pushes the download progress bar and status out of view; the notes scroll in their own box (up to 320 dp) and the progress stays below them
+- Smoother: list covers from YouTube are fetched at the small size (not maxres or a 1080 px square) and decoded at reduced size, which cuts download and memory use while scrolling long lists. Full-size art for the player is unchanged
+- Smoother: downloaded covers are kept in a 48 MB disk cache, so Home's shelves and queue covers don't download again on every launch
+- Docs: README now covers video, the slow-connection note, seek bar scenes, frosted glass, playlist tools, current build and test commands, and a performance section
+
 ## Online 0.9.3.5
 
 - Playback: a streamed song or video that keeps buffering for 5 seconds now shows a "Slow connection" note (or "You're offline" when there is no connection). Songs and videos are watched the same way, the note stays up while it lasts and goes away as soon as playback runs again, and it shows at most once every 30 seconds. A video that is still stuck after 15 seconds takes the usual path: one quiet retry, then back to the sound

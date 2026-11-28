@@ -14,6 +14,9 @@ import com.skarif.kairos.data.db.isOnline
 import com.skarif.kairos.data.db.contentUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicInteger
 
 /** The two colours every screen takes from the album art. Stored as ARGB ints. */
 data class AlbumColors(val accent: Int, val onAccent: Int)
@@ -24,6 +27,10 @@ class ArtworkRepository(private val context: Context) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
     private val colors = LruCache<String, AlbumColors>(400)
+
+    /** Raw bytes of downloaded covers, so Home's shelves don't download every cover again on each launch. */
+    private val artDir = File(context.cacheDir, "art")
+    private val diskWrites = AtomicInteger()
 
     /** The cached bitmap, if already decoded; never touches the disk. */
     fun peek(song: SongEntity, sizePx: Int = 720): Bitmap? =
@@ -66,31 +73,89 @@ class ArtworkRepository(private val context: Context) {
      * 480×360 with black bars, which looked soft and dark on the full-screen player.
      */
     private fun loadRemote(url: String, sizePx: Int): Bitmap? {
-        for (candidate in candidates(url)) {
-            val bmp = runCatching { fetch(candidate) }.getOrNull() ?: continue
+        for (candidate in candidates(url, sizePx)) {
+            val bytes = runCatching { fetchBytes(candidate) }.getOrNull() ?: continue
+            val bmp = decodeForSize(bytes, sizePx) ?: continue
             return squareCrop(bmp, sizePx)
         }
         return null
     }
 
-    private fun candidates(url: String): List<String> {
+    /**
+     * Small thumbnails (list rows) don't need the biggest file: asking for maxres or a 1080 px
+     * square for a 160 px row was ~10x the download and decode work for nothing visible.
+     */
+    private fun candidates(url: String, sizePx: Int): List<String> {
+        val small = sizePx <= SMALL_ART_PX
         // YouTube Music art: ask for a bigger square than older rows stored.
-        if ("googleusercontent.com" in url) return listOf(url.replace(Regex("=w\\d+-h\\d+"), "=w1080-h1080"), url)
+        if ("googleusercontent.com" in url) {
+            val side = if (small) 544 else 1080
+            return listOf(url.replace(Regex("=w\\d+-h\\d+"), "=w$side-h$side"), url).distinct()
+        }
         val id = Regex("""i\.ytimg\.com/vi(?:_webp)?/([\w-]{6,})/""").find(url)?.groupValues?.get(1) ?: return listOf(url)
+        if (small) return listOf(url)
         return listOf("https://i.ytimg.com/vi/$id/maxresdefault.jpg", "https://i.ytimg.com/vi/$id/hq720.jpg", url)
     }
 
-    private fun fetch(url: String): Bitmap? {
+    /** The cover's bytes: from the disk cache when present, otherwise downloaded once and kept. */
+    private fun fetchBytes(url: String): ByteArray? {
+        val file = File(artDir, sha1(url))
+        if (file.isFile) {
+            runCatching { file.readBytes() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let {
+                file.setLastModified(System.currentTimeMillis()) // least recently used goes first when trimming
+                return it
+            }
+        }
         val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-        return try {
+        val bytes = try {
             conn.connectTimeout = 10_000
             conn.readTimeout = 10_000
             if (conn.responseCode !in 200..299) return null // maxres doesn't exist for every video
-            val bytes = conn.inputStream.use { it.readBytes() }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            conn.inputStream.use { it.readBytes() }
         } finally {
             conn.disconnect()
         }
+        runCatching {
+            artDir.mkdirs()
+            val tmp = File(artDir, file.name + ".tmp")
+            tmp.writeBytes(bytes)
+            if (!tmp.renameTo(file)) tmp.delete()
+            if (diskWrites.incrementAndGet() % 25 == 0) trimDiskCache()
+        }
+        return bytes
+    }
+
+    /** Keeps the cover cache under [DISK_CACHE_BYTES]: drops the least recently used files down to 75 %. */
+    private fun trimDiskCache() {
+        val files = artDir.listFiles() ?: return
+        var total = files.sumOf { it.length() }
+        if (total <= DISK_CACHE_BYTES) return
+        for (f in files.sortedBy { it.lastModified() }) {
+            if (total <= DISK_CACHE_BYTES * 3 / 4) break
+            total -= f.length()
+            f.delete()
+        }
+    }
+
+    private fun sha1(s: String): String =
+        MessageDigest.getInstance("SHA-1").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
+
+    /**
+     * Decodes at a reduced size when the picture is much bigger than [sizePx]: a 1280x720 cover
+     * shown as a 160 px thumbnail was decoded in full (3.5 MB) only to be cropped and shrunk.
+     * The sample step is a power of two that still leaves the cropped square at least [sizePx] wide.
+     */
+    private fun decodeForSize(bytes: ByteArray, sizePx: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val w = bounds.outWidth
+        val h = bounds.outHeight
+        if (w <= 0 || h <= 0) return null
+        val picture = if (w * 3 == h * 4) w * 9 / 16 else h // same letterbox rule as squareCrop
+        val side = minOf(w, picture)
+        var sample = 1
+        while (side / (sample * 2) >= sizePx) sample *= 2
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
     }
 
     private fun squareCrop(src: Bitmap, sizePx: Int): Bitmap {
@@ -112,6 +177,9 @@ class ArtworkRepository(private val context: Context) {
 
     companion object {
         const val DEFAULT_ACCENT = 0xFFBD3657.toInt()
+        /** Covers asked for at this size or less (list rows) use the small image, not maxres. */
+        private const val SMALL_ART_PX = 200
+        private const val DISK_CACHE_BYTES = 48L * 1024 * 1024
         private const val INK = 0xFF151515.toInt()
         private const val WHITE = 0xFFFFFFFF.toInt()
 

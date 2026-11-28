@@ -117,6 +117,8 @@ class ScenePalette(
     val cool: Color,
     /** The bright line along the played wave: white at night, a deeper tint of the accent by day. */
     val edge: Color = Color.White,
+    /** Light theme: a pale sky, so waves, the played part, the outline and the knob are drawn stronger. */
+    val day: Boolean = false,
 )
 
 /**
@@ -152,7 +154,8 @@ fun scenePalette(accent: Color, lift: Float = 0f, blend: Color = Color.Unspecifi
         mid = mid,
         base = when { day -> hsv(h, (s * 1.05f).coerceAtMost(1f), 0.74f); appNight -> hsv(h, s * 0.85f, 0.88f); else -> hsv(h, s, 0.92f) },
         glow = if (day) hsv(h, s * 0.85f, 0.90f) else hsv(h, s * 0.55f, 1f),
-        hi = lerp(hsv(h, s * 0.30f, 1f), Color.White, 0.45f),
+        // By day the near-white of stars, petals and the moon would vanish on the pale sky: a deeper tint.
+        hi = if (day) lerp(hsv(h, s * 0.55f, 0.84f), Color.White, 0.12f) else lerp(hsv(h, s * 0.30f, 1f), Color.White, 0.45f),
         // Close to the accent on the colour wheel and a touch softer: the bands read as shades of the
         // cover's colour, not a rainbow (they used to sit 40 degrees either side at full strength).
         // By day the layers must differ in lightness too (a pale sky swallows hue alone): the warm one
@@ -160,6 +163,7 @@ fun scenePalette(accent: Color, lift: Float = 0f, blend: Color = Color.Unspecifi
         warm = if (day) hsv(h - 22f, if (neutral) s else s * 0.80f, 0.98f) else hsv(h - 16f, if (neutral) s else s * 0.85f, 1f),
         cool = if (day) hsv(h + 24f, s, 0.58f) else hsv(h + 18f, if (neutral) s else s * 0.85f, 1f),
         edge = when { day -> hsv(h, s, 0.55f); appNight -> hsv(h, s * 0.25f, 1f); else -> Color.White },
+        day = day,
     )
 }
 
@@ -257,12 +261,13 @@ private fun DrawScope.drawWaves(style: SeekStyle, p: ScenePalette, t: Float, amp
     val h = size.height
     val w = size.width
     val wide = style == SeekStyle.WAVE
-    val colors = if (wide) listOf(p.cool.copy(alpha = 0.34f), p.warm.copy(alpha = 0.30f), p.base.copy(alpha = 0.46f))
-    else listOf(p.glow.copy(alpha = 0.22f), lerp(p.mid, p.base, 0.5f).copy(alpha = 0.55f), p.base.copy(alpha = 0.42f))
+    val k = if (p.day) 1.5f else 1f // the same alphas vanish on a pale daytime sky
+    val colors = if (wide) listOf(p.cool.copy(alpha = 0.34f * k), p.warm.copy(alpha = 0.30f * k), p.base.copy(alpha = 0.46f * k))
+    else listOf(p.glow.copy(alpha = 0.22f * k), lerp(p.mid, p.base, 0.5f).copy(alpha = (0.55f * k).coerceAtMost(0.9f)), p.base.copy(alpha = 0.42f * k))
     for (layer in 2 downTo 0) {
         buildWave(path, layer, w, t, amp, beat, wide, close = true)
         val c = colors[2 - layer]
-        drawPath(path, Brush.verticalGradient(listOf(c, c.copy(alpha = c.alpha * 0.25f)), startY = h * 0.35f, endY = h))
+        drawPath(path, Brush.verticalGradient(listOf(c, c.copy(alpha = c.alpha * (if (p.day) 0.45f else 0.25f))), startY = h * 0.35f, endY = h))
     }
 }
 
@@ -636,18 +641,19 @@ private fun DrawScope.drawProgress(p: ScenePalette, style: SeekStyle, t: Float, 
         drawPath(
             path,
             Brush.verticalGradient(
-                listOf(p.glow.copy(alpha = 0.92f), p.base.copy(alpha = 0.60f), p.base.copy(alpha = 0.28f)),
+                if (p.day) listOf(p.base.copy(alpha = 0.95f), p.base.copy(alpha = 0.78f), p.base.copy(alpha = 0.50f))
+                else listOf(p.glow.copy(alpha = 0.92f), p.base.copy(alpha = 0.60f), p.base.copy(alpha = 0.28f)),
                 startY = h * (if (wide) 0.40f else 0.62f), endY = h,
             ),
         )
         buildWave(path, 0, playX, t, amp, beat, wide, close = false)
-        drawPath(path, p.glow.copy(alpha = 0.20f), style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-        drawPath(path, p.edge.copy(alpha = 0.70f), style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(path, (if (p.day) p.base else p.glow).copy(alpha = if (p.day) 0.25f else 0.20f), style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(path, p.edge.copy(alpha = if (p.day) 0.95f else 0.70f), style = Stroke(width = (if (p.day) 2.dp else 1.5.dp).toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
     // A hairline, only there to define the pill; it used to be a bright 1.5 dp ring.
     val sw = 1.dp.toPx()
     drawRoundRect(
-        p.glow.copy(alpha = 0.22f), topLeft = Offset(sw / 2f, sw / 2f), size = Size(w - sw, h - sw),
+        (if (p.day) p.edge.copy(alpha = 0.40f) else p.glow.copy(alpha = 0.22f)), topLeft = Offset(sw / 2f, sw / 2f), size = Size(w - sw, h - sw),
         cornerRadius = CornerRadius((h - sw) / 2f), style = Stroke(width = sw),
     )
 }
@@ -659,9 +665,11 @@ private fun DrawScope.drawKnob(p: ScenePalette, style: SeekStyle, t: Float, amp:
     val ky = crest.coerceIn(r + 2f, (size.height - r - 2f).coerceAtLeast(r + 2f))
     val c = Offset(kx, ky)
     val halo = r * (3.2f + 0.8f * lens + 0.6f * beat)
-    drawCircle(Brush.radialGradient(listOf(p.glow.copy(alpha = 0.65f), Color.Transparent), center = c, radius = halo), radius = halo, center = c)
+    drawCircle(Brush.radialGradient(listOf((if (p.day) p.base else p.glow).copy(alpha = if (p.day) 0.40f else 0.65f), Color.Transparent), center = c, radius = halo), radius = halo, center = c)
+    // A white knob on a pale daytime sky needs a soft shadow and a clear ring to be seen.
+    if (p.day) drawCircle(Color.Black.copy(alpha = 0.16f), r * 1.08f, Offset(c.x, c.y + 1.5.dp.toPx()))
     drawCircle(Color.White, r, c)
-    drawCircle(p.base.copy(alpha = 0.18f), r, c, style = Stroke(width = 1.dp.toPx()))
+    drawCircle(p.base.copy(alpha = if (p.day) 0.85f else 0.18f), r, c, style = Stroke(width = (if (p.day) 2.dp else 1.dp).toPx()))
 }
 
 /** The two canvases of a scene seek bar: the clipped pill with its scene and progress, and the knob on top, unclipped so its glow isn't cut. */

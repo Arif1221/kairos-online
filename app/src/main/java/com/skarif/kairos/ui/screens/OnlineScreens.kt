@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -31,6 +32,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -922,15 +924,22 @@ fun UpdateDialog(vm: MainViewModel) {
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (u.notes.isNotEmpty()) {
-                    Text("What's new", style = T.title, color = c.text)
-                    u.notes.forEach { note ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Box(Modifier.padding(top = 8.dp).size(6.dp).clip(CircleShape).background(c.accent))
-                            Text(note, Modifier.weight(1f), style = T.body, color = c.muted)
+                // The notes scroll inside their own box (capped at 320 dp), so a long list can't push the
+                // progress bar and status below it out of the popup.
+                Column(
+                    Modifier.weight(1f, fill = false).heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (u.notes.isNotEmpty()) {
+                        Text("What's new", style = T.title, color = c.text)
+                        u.notes.forEach { note ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Box(Modifier.padding(top = 8.dp).size(6.dp).clip(CircleShape).background(c.accent))
+                                Text(note, Modifier.weight(1f), style = T.body, color = c.muted)
+                            }
                         }
-                    }
-                } else Text("Fixes and improvements.", style = T.body, color = c.muted)
+                    } else Text("Fixes and improvements.", style = T.body, color = c.muted)
+                }
                 when (val st = status) {
                     is com.skarif.kairos.online.SelfUpdate.Status.Downloading -> {
                         Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

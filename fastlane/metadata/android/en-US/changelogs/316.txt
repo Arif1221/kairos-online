@@ -1,0 +1,5 @@
+• Smoother video: smaller buffer, fewer dropped frames, decoder fallback
+• Light theme: seek bar is clear again
+• Update popup: long notes scroll and the progress bar stays visible
+• Covers load smaller and are kept on disk
+• README brought up to date
