@@ -39,6 +39,24 @@ enum class SongSort(val label: String) {
     TITLE("Title"), ARTIST("Artist"), ALBUM("Album"), DATE_ADDED("Date added"), LENGTH("Length"), MOST_PLAYED("Most played")
 }
 
+/** How the song's progress bar looks. Every style except [BARS] is a small animated scene tinted by the album. */
+enum class SeekStyle(val label: String, val blurb: String) {
+    WAVE("Minimal Wave+", "Fluid wave with beat response"),
+    SAKURA("Sakura Flow", "Falling petals on flowing waves"),
+    STARRY("Starry Horizon", "Moving stars and a parallax sky"),
+    AURORA("Aurora Drift", "Aurora lights with soft motion"),
+    COSMIC("Cosmic Orbit", "Orbiting particles and cosmic dust"),
+    BARS("Classic Bars", "The original bar waveform"),
+}
+
+/** How lively the animated seekbar and the Home card are. [speed] scales time, [amp] scales wave height. */
+enum class SeekMotion(val label: String, val speed: Float, val amp: Float) {
+    STILL("Still", 0f, 0.85f), CALM("Calm", 0.55f, 0.75f), NORMAL("Normal", 1f, 1f), LIVELY("Lively", 1.7f, 1.3f),
+}
+
+/** What the big card at the top of Home animates. */
+enum class HomeCardStyle(val label: String) { TIME_OF_DAY("Time of day"), MATCH_SEEKBAR("Match seekbar") }
+
 /** A little heavier veil than the old 0.5 so text stays easy to read over bright covers. */
 const val DEFAULT_BACKGROUND_GLOW = 0.38f
 
@@ -50,6 +68,9 @@ data class Settings(
     /** 0 = a heavy veil over the living background, 1 = almost none. [DEFAULT_BACKGROUND_GLOW] is the default look. */
     val backgroundGlow: Float = DEFAULT_BACKGROUND_GLOW,
     val pureBlack: Boolean = false,
+    val seekStyle: SeekStyle = SeekStyle.WAVE,
+    val seekMotion: SeekMotion = SeekMotion.NORMAL,
+    val homeCardStyle: HomeCardStyle = HomeCardStyle.TIME_OF_DAY,
     val readEmbeddedLyrics: Boolean = true,
     val readLrcFiles: Boolean = true,
     val lyricsPreference: LyricsPreference = LyricsPreference.EMBEDDED,
@@ -120,6 +141,9 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
         val blur = booleanPreferencesKey("blur")
         val glow = androidx.datastore.preferences.core.floatPreferencesKey("bg_glow")
         val pureBlack = booleanPreferencesKey("pure_black")
+        val seekStyle = stringPreferencesKey("seek_style")
+        val seekMotion = stringPreferencesKey("seek_motion")
+        val homeCardStyle = stringPreferencesKey("home_card_style")
         val embedded = booleanPreferencesKey("lyrics_embedded")
         val lrc = booleanPreferencesKey("lyrics_lrc")
         val lyricsPref = stringPreferencesKey("lyrics_pref")
@@ -177,6 +201,9 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
             blurBackground = p[K.blur] ?: d.blurBackground,
             backgroundGlow = (p[K.glow] ?: d.backgroundGlow).coerceIn(0f, 1f),
             pureBlack = p[K.pureBlack] ?: d.pureBlack,
+            seekStyle = enumOr(p[K.seekStyle], d.seekStyle),
+            seekMotion = enumOr(p[K.seekMotion], d.seekMotion),
+            homeCardStyle = enumOr(p[K.homeCardStyle], d.homeCardStyle),
             readEmbeddedLyrics = p[K.embedded] ?: d.readEmbeddedLyrics,
             readLrcFiles = p[K.lrc] ?: d.readLrcFiles,
             lyricsPreference = enumOr(p[K.lyricsPref], d.lyricsPreference),
@@ -222,6 +249,9 @@ class SettingsStore(context: Context, scope: CoroutineScope) {
         p[K.blur] = s.blurBackground
         p[K.glow] = s.backgroundGlow.coerceIn(0f, 1f)
         p[K.pureBlack] = s.pureBlack
+        p[K.seekStyle] = s.seekStyle.name
+        p[K.seekMotion] = s.seekMotion.name
+        p[K.homeCardStyle] = s.homeCardStyle.name
         p[K.embedded] = s.readEmbeddedLyrics
         p[K.lrc] = s.readLrcFiles
         p[K.lyricsPref] = s.lyricsPreference.name

@@ -12,6 +12,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -42,7 +46,10 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.skarif.kairos.data.LyricsPreference
 import com.skarif.kairos.data.DownloadMode
+import com.skarif.kairos.data.HomeCardStyle
 import com.skarif.kairos.data.OutputMode
+import com.skarif.kairos.data.SeekMotion
+import com.skarif.kairos.data.SeekStyle
 import com.skarif.kairos.data.ReplayGainMode
 import com.skarif.kairos.data.ThemeMode
 import com.skarif.kairos.ui.MainViewModel
@@ -53,6 +60,7 @@ import com.skarif.kairos.ui.components.Ic
 import com.skarif.kairos.ui.components.Pill
 import com.skarif.kairos.ui.components.RadioCard
 import com.skarif.kairos.ui.components.ScreenBackground
+import com.skarif.kairos.ui.components.SeekPreview
 import com.skarif.kairos.ui.components.Segmented
 import com.skarif.kairos.ui.components.ToggleRow
 import com.skarif.kairos.ui.theme.P
@@ -70,6 +78,36 @@ private fun Header(title: String, onBack: () -> Unit) {
         CircleButton(Ic.Back, "Back", onBack, size = 44.dp)
         Text(title, Modifier.weight(1f), style = T.title, color = P.colors.text, textAlign = TextAlign.Center)
         Box(Modifier.size(44.dp))
+    }
+}
+
+/** A small heading that groups the cards below it (Appearance, Music, Library and data, About). */
+@Composable
+private fun SectionLabel(text: String) {
+    val c = P.colors
+    Row(Modifier.padding(top = 10.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.size(7.dp).clip(CircleShape).background(c.accent))
+        Text(text.uppercase(), style = T.kicker, color = c.muted)
+    }
+}
+
+/** One choice in the seekbar style picker: a live miniature, the name, and what it does. Only the chosen one moves. */
+@Composable
+private fun SeekStyleTile(style: SeekStyle, selected: Boolean, motion: SeekMotion, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val c = P.colors
+    val shape = RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)
+    Column(
+        modifier
+            .clip(shape)
+            .background(if (selected) c.tint else c.chip)
+            .border(if (selected) 2.dp else 1.dp, if (selected) c.accent else c.line.copy(alpha = 0.3f), shape)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        SeekPreview(style, motion, Modifier.fillMaxWidth(), height = 34.dp, animate = selected)
+        Text(style.label, style = T.label.copy(fontSize = 14.sp), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(style.blurb, style = T.small.copy(fontSize = 12.sp, lineHeight = 15.sp), color = c.muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -106,6 +144,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onFolders: () -> Unit,
             Header("Settings", onBack)
             Text(mixedHeadline("Make it " to false, "yours" to true), style = T.h1, color = c.text)
 
+            SectionLabel("Appearance")
             Card(Modifier) {
                 Text("Theme", style = T.h2, color = c.text)
                 Segmented(listOf("Light", "Dark", "System"), s.themeMode.ordinal, { i ->
@@ -152,6 +191,46 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onFolders: () -> Unit,
                 ToggleRow("Pure black in dark mode", s.pureBlack, { v -> vm.updateSettings { it.copy(pureBlack = v) } }, "Saves battery on AMOLED screens")
             }
 
+            Card(Modifier) {
+                Text("Seekbar", style = T.h2, color = c.text)
+                Text("How the song's progress looks in the player. Colours follow the album art.", style = T.small, color = c.muted)
+                SeekPreview(s.seekStyle, s.seekMotion, Modifier.fillMaxWidth(), height = 72.dp)
+                Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("1:12", style = T.num, color = c.text)
+                    Text("\u22122:41", style = T.num, color = c.muted)
+                }
+                SeekStyle.entries.chunked(2).forEach { pair ->
+                    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        pair.forEach { st ->
+                            SeekStyleTile(
+                                st, st == s.seekStyle, s.seekMotion,
+                                { vm.updateSettings { it.copy(seekStyle = st) } },
+                                Modifier.weight(1f).fillMaxHeight(),
+                            )
+                        }
+                    }
+                }
+                Text("Animation", style = T.small, color = c.muted)
+                Segmented(SeekMotion.entries.map { it.label }, s.seekMotion.ordinal, { i ->
+                    vm.updateSettings { it.copy(seekMotion = SeekMotion.entries[i]) }
+                })
+                Text(
+                    if (s.seekMotion == SeekMotion.STILL) "Scenes are drawn but don't move. Easiest on the battery."
+                    else "The scenes move while a song plays, and the Home card moves while you look at it.",
+                    style = T.small, color = c.muted,
+                )
+                Text("Home card", style = T.small, color = c.muted)
+                Segmented(HomeCardStyle.entries.map { it.label }, s.homeCardStyle.ordinal, { i ->
+                    vm.updateSettings { it.copy(homeCardStyle = HomeCardStyle.entries[i]) }
+                })
+                Text(
+                    if (s.homeCardStyle == HomeCardStyle.TIME_OF_DAY) "Petals at sunrise, waves in the afternoon, a ringed planet at dusk, stars at night."
+                    else "The big card on Home uses the seekbar's style.",
+                    style = T.small, color = c.muted,
+                )
+            }
+
+            SectionLabel("Music")
             Card(Modifier) {
                 Text("Lyrics", style = T.h2, color = c.text)
                 ToggleRow(
@@ -263,6 +342,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onFolders: () -> Unit,
                 DownloadsCard(vm)
             }
 
+            SectionLabel("Library and data")
             Card(Modifier) {
                 Text("Library", style = T.h2, color = c.text)
                 Text(
@@ -328,6 +408,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onFolders: () -> Unit,
                 }
             }
 
+            SectionLabel("About")
             if (vm.onlineName != null) OnlineAboutCard(vm) else Card(Modifier) {
                 Text("About", style = T.h2, color = c.text)
                 val version = androidx.compose.runtime.remember {

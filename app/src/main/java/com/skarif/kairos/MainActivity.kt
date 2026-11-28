@@ -1,6 +1,8 @@
 package com.skarif.kairos
 
 import android.app.Activity
+import com.skarif.kairos.ui.components.frosted
+import androidx.compose.ui.graphics.layer.drawLayer
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -182,8 +184,8 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
         LaunchedEffect(Unit) { vm.onlineUi.askStorage.collect { askStorage.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) } }
         fun openCollection(key: String) =
             // Online build: liked artists / albums are online pages, not library collections.
-            if (key.startsWith("online:")) nav.navigate("online/liked/" + key.removePrefix("online:"))
-            else nav.navigate("collection/" + Uri.encode(key))
+            if (key.startsWith("online:")) nav.push("online/liked/" + key.removePrefix("online:"))
+            else nav.push("collection/" + Uri.encode(key))
         fun openAlbum(id: Long) = openCollection("album:$id")
         val openMenu = { menuOpen = true }
         val openScope = androidx.compose.runtime.rememberCoroutineScope()
@@ -269,6 +271,10 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
         val backArt by vm.artwork.collectAsStateWithLifecycle()
         val backPlaying by vm.isPlaying.collectAsStateWithLifecycle()
         val backdrop = com.skarif.kairos.ui.components.rememberBackdrop(backArt, settings.blurBackground, backPlaying, settings.backgroundGlow)
+        // The app, recorded once so floating bars (dock, mini player) can blur what is under them.
+        // Only while something floats over it, and only where real blur exists (Android 12+).
+        val appLayer = androidx.compose.ui.graphics.rememberGraphicsLayer()
+        val appBlur = android.os.Build.VERSION.SDK_INT >= 31 && (playerShown || route in TABS)
         val onlineNav = remember(nav) {
                 com.skarif.kairos.ui.screens.OnlineNav(
                     search = { q, kind ->
@@ -278,12 +284,13 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                         player.collapse()
                         nav.tab("search")
                     },
-                    collection = { id -> player.collapse(); nav.navigate("online/collection/${Uri.encode(id)}") },
-                    artist = { id, name -> player.collapse(); nav.navigate("online/artist/${Uri.encode(id)}?name=${Uri.encode(name)}") },
+                    collection = { id -> player.collapse(); nav.push("online/collection/${Uri.encode(id)}") },
+                    artist = { id, name -> player.collapse(); nav.push("online/artist/${Uri.encode(id)}?name=${Uri.encode(name)}") },
                 )
             }
         CompositionLocalProvider(
             LocalPlayer provides player, com.skarif.kairos.ui.components.LocalBackdrop provides backdrop,
+            com.skarif.kairos.ui.components.LocalAppLayer provides (if (appBlur) appLayer else null),
             // Mini player: 12 dp above the nav bar, 76 dp tall, plus a little air above it.
             com.skarif.kairos.ui.screens.LocalBottomClearance provides (if (song != null) 108.dp else 0.dp),
             // One long-press menu for every album, artist, genre, playlist and mix tile.
@@ -313,8 +320,14 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                         }
                     }
                     .drawWithContent {
-                        drawContent()
                         val p = maxOf(player.progress.value.coerceIn(0f, 1f), sheetDepth.value * 0.6f)
+                        // Re-recorded only while nothing moves over it. While the player opens the last
+                        // recording is simply replayed (a cheap display-list draw, no page redraw), and
+                        // switching back to drawing the page directly would be a one-frame hitch.
+                        if (appBlur) {
+                            if (p == 0f || appLayer.size == androidx.compose.ui.unit.IntSize.Zero) appLayer.record { this@drawWithContent.drawContent() }
+                            drawLayer(appLayer)
+                        } else drawContent()
                         if (p > 0f) drawRect(Color.Black, alpha = 0.4f * p)
                     },
                 enterTransition = Motion.enter,
@@ -334,61 +347,61 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                 screen("home") {
                     // Online build: one Home for streaming and the music on this phone.
                     if (vm.onlineName != null) com.skarif.kairos.ui.screens.ExploreScreen(
-                        vm, onMenu = openMenu, onOpenNowPlaying = openPlayer, onDownloads = { nav.navigate("downloads") },
+                        vm, onMenu = openMenu, onOpenNowPlaying = openPlayer, onDownloads = { nav.push("downloads") },
                         onOpenCollection = ::openCollection, onSearch = { nav.tab("search") },
-                        onShelf = { k -> nav.navigate("online/shelf/" + Uri.encode(k)) },
+                        onShelf = { k -> nav.push("online/shelf/" + Uri.encode(k)) },
                     ) else HomeScreen(
                         vm, onMenu = openMenu, onSearch = { nav.tab("search") }, onOpenCollection = ::openCollection,
-                        onOpenNowPlaying = openPlayer, onPlaylists = { nav.navigate("playlists") },
+                        onOpenNowPlaying = openPlayer, onPlaylists = { nav.push("playlists") },
                         onLibrary = { nav.tab("library") },
                     )
                 }
                 screen("library") {
                     LibraryScreen(
-                        vm, onOpenNowPlaying = openPlayer, onSettings = { nav.navigate("settings") },
-                        onFolders = { nav.navigate("folders") }, onSort = { tool = Tool.SORT }, onOpenAlbum = ::openAlbum, onOpenCollection = ::openCollection,
-                        onPlaylists = { nav.navigate("playlists") }, onDownloads = { nav.navigate("downloads") },
+                        vm, onOpenNowPlaying = openPlayer, onSettings = { nav.push("settings") },
+                        onFolders = { nav.push("folders") }, onSort = { tool = Tool.SORT }, onOpenAlbum = ::openAlbum, onOpenCollection = ::openCollection,
+                        onPlaylists = { nav.push("playlists") }, onDownloads = { nav.push("downloads") },
                     )
                 }
-                screen("stats") { StatsScreen(vm, onMenu = openMenu, onSettings = { nav.navigate("settings") }) }
+                screen("stats") { StatsScreen(vm, onMenu = openMenu, onSettings = { nav.push("settings") }) }
                 screen("search") {
                     SearchScreen(vm, onMenu = openMenu, onOpenCollection = ::openCollection, onOpenNowPlaying = openPlayer)
                 }
                 screen("online/shelf/{key}") { e ->
-                    com.skarif.kairos.ui.screens.ShelfScreen(vm, Uri.decode(e.arguments?.getString("key") ?: ""), onBack = { nav.popBackStack() }, onOpenNowPlaying = openPlayer)
+                    com.skarif.kairos.ui.screens.ShelfScreen(vm, Uri.decode(e.arguments?.getString("key") ?: ""), onBack = { nav.back() }, onOpenNowPlaying = openPlayer)
                 }
                 screen("online/spotify") {
-                    com.skarif.kairos.ui.screens.SpotifyImportScreen(vm, onBack = { nav.popBackStack() }, onOpenPlaylist = { id -> openCollection("playlist:$id") })
+                    com.skarif.kairos.ui.screens.SpotifyImportScreen(vm, onBack = { nav.back() }, onOpenPlaylist = { id -> openCollection("playlist:$id") })
                 }
                 screen("online/liked/{kind}") { e ->
-                    com.skarif.kairos.ui.screens.LikedOnlineScreen(vm, artists = e.arguments?.getString("kind") == "artists", onBack = { nav.popBackStack() })
+                    com.skarif.kairos.ui.screens.LikedOnlineScreen(vm, artists = e.arguments?.getString("kind") == "artists", onBack = { nav.back() })
                 }
-                screen("downloads") { com.skarif.kairos.ui.screens.DownloadsScreen(vm, onBack = { nav.popBackStack() }, onOpenNowPlaying = openPlayer) }
+                screen("downloads") { com.skarif.kairos.ui.screens.DownloadsScreen(vm, onBack = { nav.back() }, onOpenNowPlaying = openPlayer) }
                 screen("online/collection/{id}") { e ->
                     val id = Uri.decode(e.arguments?.getString("id") ?: "")
-                    com.skarif.kairos.ui.screens.OnlineCollectionScreen(vm, id, onBack = { nav.popBackStack() }, onOpenNowPlaying = openPlayer)
+                    com.skarif.kairos.ui.screens.OnlineCollectionScreen(vm, id, onBack = { nav.back() }, onOpenNowPlaying = openPlayer)
                 }
                 screen("online/artist/{id}?name={name}") { e ->
                     val id = Uri.decode(e.arguments?.getString("id") ?: "")
                     val name = Uri.decode(e.arguments?.getString("name") ?: "")
-                    com.skarif.kairos.ui.screens.OnlineArtistScreen(vm, id, name, onBack = { nav.popBackStack() }, onOpenNowPlaying = openPlayer)
+                    com.skarif.kairos.ui.screens.OnlineArtistScreen(vm, id, name, onBack = { nav.back() }, onOpenNowPlaying = openPlayer)
                 }
                 screen("playlists") {
-                    PlaylistsScreen(vm, onBack = { nav.popBackStack() }, onNew = { nav.navigate("newplaylist?fromQueue=false") }, onOpenCollection = ::openCollection, onImport = { nav.navigate("online/spotify") })
+                    PlaylistsScreen(vm, onBack = { nav.back() }, onNew = { nav.push("newplaylist?fromQueue=false") }, onOpenCollection = ::openCollection, onImport = { nav.push("online/spotify") })
                 }
                 screen("newplaylist?fromQueue={fromQueue}") { e ->
                     val fromQueue = e.arguments?.getString("fromQueue") == "true"
                     val initial = remember { if (fromQueue) vm.now.value.queue.map { it.songId } /* online songs have negative ids and belong in it too */ else emptyList() }
-                    NewPlaylistScreen(vm, onDone = { nav.popBackStack() }, initialSongs = initial)
+                    NewPlaylistScreen(vm, onDone = { nav.back() }, initialSongs = initial)
                 }
                 screen("collection/{key}") { e ->
                     val key = Uri.decode(e.arguments?.getString("key") ?: "")
-                    CollectionScreen(vm, key, onBack = { nav.popBackStack() }, onOpenNowPlaying = openPlayer, onOpenAlbum = ::openAlbum, onOpenCollection = ::openCollection)
+                    CollectionScreen(vm, key, onBack = { nav.back() }, onOpenNowPlaying = openPlayer, onOpenAlbum = ::openAlbum, onOpenCollection = ::openCollection)
                 }
                 screen("settings") {
-                    SettingsScreen(vm, onBack = { nav.popBackStack() }, onFolders = { nav.navigate("folders") }, onEqualizer = { tool = Tool.EQ })
+                    SettingsScreen(vm, onBack = { nav.back() }, onFolders = { nav.push("folders") }, onEqualizer = { tool = Tool.EQ })
                 }
-                screen("folders") { FoldersScreen(vm, onBack = { nav.popBackStack() }) }
+                screen("folders") { FoldersScreen(vm, onBack = { nav.back() }) }
             }
 
             // Where the mini player rests: above the dock on tabs, near the bottom edge elsewhere.
@@ -453,7 +466,7 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     if (song != null) Spacer(Modifier.height(74.dp)) // room for the mini player
-                    Dock(route = route, onTab = { if (it == route) vm.reselectTab(it) else nav.tab(it) }, onNow = openPlayer)
+                    Dock(route = route, onTab = { if (it == route) vm.reselectTab(it) else nav.tab(it) }, onNow = openPlayer, frostOn = { player.progress.value < 0.01f })
                 }
             }
 
@@ -471,7 +484,7 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                     },
                     onSleep = { tool = Tool.SLEEP },
                     onEqualizer = { tool = Tool.EQ },
-                    onSaveQueue = { nav.navigate("newplaylist?fromQueue=true") },
+                    onSaveQueue = { nav.push("newplaylist?fromQueue=true") },
                 )
             }
 
@@ -491,8 +504,8 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
                         "eq" -> tool = Tool.EQ
                         "sleep" -> tool = Tool.SLEEP
                         in TABS -> nav.tab(r)
-                        "newplaylist" -> nav.navigate("newplaylist?fromQueue=false")
-                        else -> nav.navigate(r)
+                        "newplaylist" -> nav.push("newplaylist?fromQueue=false")
+                        else -> nav.push(r)
                     }
                 }
             }
@@ -541,6 +554,15 @@ private fun PlayerRoot(start: String, vm: MainViewModel = viewModel()) {
 private fun NavGraphBuilder.screen(route: String, content: @Composable (NavBackStackEntry) -> Unit) =
     composable(route) { entry -> ProvideNavScope(this) { content(entry) } }
 
+/**
+ * Page pushes and backs are ignored while the current page is still animating: a double tap used
+ * to push the same page twice, or pop two pages at once.
+ */
+private fun NavHostController.settled() =
+    currentBackStackEntry?.lifecycle?.currentState == androidx.lifecycle.Lifecycle.State.RESUMED
+private fun NavHostController.push(route: String) { if (settled()) navigate(route) }
+private fun NavHostController.back() { if (settled()) popBackStack() }
+
 /** Tab-style navigation: one copy of each tab, Home at the bottom of the stack. */
 private fun NavHostController.tab(route: String) = navigate(route) {
     popUpTo("home") { saveState = true }
@@ -550,12 +572,12 @@ private fun NavHostController.tab(route: String) = navigate(route) {
 
 /** Design reference: the frosted circle dock with the coloured centre button. */
 @Composable
-private fun Dock(route: String?, onTab: (String) -> Unit, onNow: () -> Unit, modifier: Modifier = Modifier) {
+private fun Dock(route: String?, onTab: (String) -> Unit, onNow: () -> Unit, modifier: Modifier = Modifier, frostOn: () -> Boolean = { true }) {
     val c = P.colors
     val idle = if (c.dark) Color(0x1FFFFFFF) else Color(0xB3FFFFFF)
-    val dockBg = if (c.dark) Color(0xD93C3C3A) else Color(0xCCC4C7BE)
+    val dockBase = if (c.dark) Color(0xFF3C3C3A) else Color(0xFFC4C7BE)
     Row(
-        modifier.clip(RoundedCornerShape(40.dp)).background(dockBg).padding(8.dp),
+        modifier.frosted(RoundedCornerShape(40.dp), dockBase, lift = -0.10f, active = frostOn).padding(8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

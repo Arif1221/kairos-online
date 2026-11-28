@@ -290,8 +290,10 @@ fun NowPlayingCards(
         // Lyrics preview: the current line and the two after it, live.
         val l = (lyrics as? LyricsState.Ready)?.lyrics
         if (l != null && !l.isEmpty()) {
-            val pos by vm.position.collectAsStateWithLifecycle()
-            val at = if (l.synced) l.indexAt(pos - offset).coerceAtLeast(0) else 0
+            // Read through derivedStateOf: this block recomposes when the current line changes,
+            // not on every position tick (the whole Column used to recompose about every 100 ms).
+            val pos = vm.position.collectAsStateWithLifecycle()
+            val at by remember(l, offset) { androidx.compose.runtime.derivedStateOf { if (l.synced) l.indexAt(pos.value - offset).coerceAtLeast(0) else 0 } }
             InfoCard("Lyrics", "Show all", onLyrics) {
                 l.lines.drop(at).take(if (l.synced) 3 else 4).forEachIndexed { i, line ->
                     Text(

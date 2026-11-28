@@ -71,6 +71,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
@@ -551,8 +552,12 @@ fun KairosSheet(onDismiss: () -> Unit, content: @Composable androidx.compose.fou
         setOf(androidx.compose.material3.SheetValue.Hidden, androidx.compose.material3.SheetValue.Expanded),
     )
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val closing = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     val close: () -> Unit = {
-        scope.launch { state.hide() }.invokeOnCompletion { if (!state.isVisible) onDismiss() }
+        // Once only: a double tap on Done used to call onDismiss twice.
+        if (closing.compareAndSet(false, true)) {
+            scope.launch { state.hide() }.invokeOnCompletion { if (!state.isVisible) onDismiss() else closing.set(false) }
+        }
     }
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -567,30 +572,87 @@ fun KairosSheet(onDismiss: () -> Unit, content: @Composable androidx.compose.fou
 }
 
 /**
- * iOS large-title behaviour: once the page's big title has scrolled away, a small bar with the
- * title fades and slides in at the top. Tapping it scrolls back to the top.
+ * What lets a page's small title bar frost the page under it. [ScreenBackground] records the page
+ * into [source] and draws the bar itself, so the bar can draw a blurred copy of what scrolls behind
+ * it. [CompactTitleBar] only tells this state what to show.
+ */
+@androidx.compose.runtime.Stable
+class GlassState(
+    val source: androidx.compose.ui.graphics.layer.GraphicsLayer,
+    val frost: androidx.compose.ui.graphics.layer.GraphicsLayer,
+) {
+    /** Null while the page has no small title bar. */
+    var title by mutableStateOf<String?>(null)
+    var showBar by mutableStateOf(false)
+    var onTop: () -> Unit = {}
+}
+
+val LocalGlass = androidx.compose.runtime.staticCompositionLocalOf<GlassState?> { null }
+
+/**
+ * iOS large-title behaviour: once the page's big title has scrolled away, a small frosted bar with
+ * the title fades in at the top. Tapping it scrolls back to the top. On Android 12 and up the bar
+ * blurs what is under it; older versions get a plainer, more opaque bar.
  */
 @Composable
 fun BoxScope.CompactTitleBar(title: String, visible: Boolean, onTop: () -> Unit) {
+    val glass = LocalGlass.current
+    if (glass != null) {
+        // Hand over to ScreenBackground, which draws the bar above the recorded page. Written only
+        // when something changed, so this never loops.
+        androidx.compose.runtime.SideEffect {
+            if (glass.title != title) glass.title = title
+            if (glass.showBar != visible) glass.showBar = visible
+            glass.onTop = onTop
+        }
+        androidx.compose.runtime.DisposableEffect(glass) { onDispose { glass.title = null; glass.showBar = false } }
+        return
+    }
     val c = P.colors
-    val panel = c.panel
     androidx.compose.animation.AnimatedVisibility(
         visible,
         modifier = Modifier.align(Alignment.TopCenter),
-        enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(160)) +
-            androidx.compose.animation.slideInVertically(com.skarif.kairos.ui.motion.Motion.snappy()) { -it / 2 },
-        exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(120)) +
-            androidx.compose.animation.slideOutVertically(com.skarif.kairos.ui.motion.Motion.snappy()) { -it / 2 },
+        enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(180)),
+        exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(140)),
+    ) {
+        Column(Modifier.fillMaxWidth().background(c.panel).clickable(onClickLabel = "Scroll to top", role = Role.Button, onClick = onTop).statusBarsPadding()) {
+            Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) { Text(title, style = T.title, color = c.text, maxLines = 1) }
+        }
+    }
+}
+
+/** The frosted small title bar, drawn by [ScreenBackground] above the recorded page. */
+@Composable
+internal fun BoxScope.GlassTitleBar(glass: GlassState) {
+    val c = P.colors
+    val blur = android.os.Build.VERSION.SDK_INT >= 31
+    // With a real blur the bar can be mostly see-through; without one it needs to stay readable.
+    val tint = frostTint(c.panel, blur)
+    val shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp)
+    androidx.compose.animation.AnimatedVisibility(
+        glass.showBar,
+        modifier = Modifier.align(Alignment.TopCenter),
+        enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(180)),
+        exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(140)),
     ) {
         Column(
-            Modifier.fillMaxWidth().background(panel)
-                .clickable(onClickLabel = "Scroll to top", role = Role.Button, onClick = onTop)
+            Modifier.fillMaxWidth()
+                .clip(shape)
+                .drawBehind {
+                    if (blur) {
+                        val r = 22.dp.toPx()
+                        glass.frost.setBlur(r)
+                        glass.frost.record { drawLayer(glass.source) }
+                        drawLayer(glass.frost)
+                    }
+                    drawRect(tint)
+                }
+                .clickable(onClickLabel = "Scroll to top", role = Role.Button) { glass.onTop() }
                 .statusBarsPadding(),
         ) {
             Box(Modifier.fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
-                Text(title, style = T.title, color = c.text, maxLines = 1)
+                Text(glass.title.orEmpty(), style = T.title, color = c.text, maxLines = 1)
             }
-            Box(Modifier.fillMaxWidth().height(0.8.dp).background(c.line.copy(alpha = 0.25f)))
         }
     }
 }
@@ -611,7 +673,9 @@ val HeaderShape = RoundedCornerShape(bottomStart = 40.dp, bottomEnd = 40.dp)
 @Composable
 fun Modifier.headerPanel(pull: () -> Float = { 0f }): Modifier = this
     .fillMaxWidth()
-    .stretchPanel(P.colors.panel, pull = pull)
+    // See-through, tinted by the cover: on a dark cover a 92% white slab looked pasted on.
+    // (Nothing scrolls under this panel, only the soft backdrop, so no blur is needed, just a lower alpha.)
+    .stretchPanel(frostTint(P.colors.panel, true, lift = -0.10f), pull = pull)
     .clip(HeaderShape)
     .statusBarsPadding()
     .padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 18.dp)

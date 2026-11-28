@@ -77,6 +77,7 @@ class Backup(private val db: PlayerDatabase, private val settings: SettingsStore
             .put("glow", s.backgroundGlow.toDouble()).put("videoQuality", s.videoQuality.name)
             .put("videoSubtitles", s.videoSubtitles).put("miniLyrics", s.miniLyrics)
             .put("searchVideosFirst", s.searchVideosFirst)
+            .put("seekStyle", s.seekStyle.name).put("seekMotion", s.seekMotion.name).put("homeCardStyle", s.homeCardStyle.name)
         return JSONObject()
             .put("app", "Kairos").put("version", 1).put("createdAt", System.currentTimeMillis())
             .put("songs", songArr).put("favourites", favs).put("playlists", lists).put("plays", plays).put("lyricsOffsets", offsets)
@@ -211,6 +212,9 @@ class Backup(private val db: PlayerDatabase, private val settings: SettingsStore
                     videoSubtitles = p.optBoolean("videoSubtitles", n.videoSubtitles),
                     miniLyrics = p.optBoolean("miniLyrics", n.miniLyrics),
                     searchVideosFirst = p.optBoolean("searchVideosFirst", n.searchVideosFirst),
+                    seekStyle = enum("seekStyle", SeekStyle.entries.toTypedArray(), n.seekStyle),
+                    seekMotion = enum("seekMotion", SeekMotion.entries.toTypedArray(), n.seekMotion),
+                    homeCardStyle = enum("homeCardStyle", HomeCardStyle.entries.toTypedArray(), n.homeCardStyle),
                 )
             }
             n

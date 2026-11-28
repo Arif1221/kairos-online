@@ -117,6 +117,8 @@ fun ActionSheet(
     }
 
     fun run(a: SheetAction) {
+        // A second tap while the sheet is sliding away must not run the action again.
+        if (closing) return
         when {
             a.submenu != null -> sub = a
             a.keepOpen -> a.onClick()
@@ -154,11 +156,13 @@ fun ActionSheet(
                     .background(c.sheet)
                     // Pull down on the header to close; the list below scrolls as usual.
                     .draggable(
-                        rememberDraggableState { d -> scope.launch { drag.snapTo((drag.value + d).coerceAtLeast(0f)) } },
+                        rememberDraggableState { d -> if (!closing) scope.launch { drag.snapTo((drag.value + d).coerceAtLeast(0f)) } },
                         Orientation.Vertical,
                         onDragStopped = { v ->
-                            if (drag.value > with(density) { 72.dp.toPx() } || v > 1500f) close()
-                            else drag.animateTo(0f, Motion.spatial())
+                            if (!closing) {
+                                if (drag.value > with(density) { 72.dp.toPx() } || v > 1500f) close()
+                                else drag.animateTo(0f, Motion.spatial())
+                            }
                         },
                     )
                     .padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 14.dp),

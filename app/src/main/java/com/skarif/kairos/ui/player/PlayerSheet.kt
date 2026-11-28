@@ -1,5 +1,8 @@
 package com.skarif.kairos.ui.player
 
+import com.skarif.kairos.ui.components.LocalAppLayer
+import com.skarif.kairos.ui.components.drawFrost
+import com.skarif.kairos.ui.components.frostTint
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
@@ -151,6 +154,9 @@ class PlayerController(private val scope: CoroutineScope) {
     var pagesBuilt by mutableStateOf(false)
 
     fun expand(to: PlayerPage = PlayerPage.MAIN) {
+        // Already open or opening on this page (a double tap on the dock or mini player): leave the
+        // running spring alone; restarting it would drop its velocity and stutter.
+        if (isOpen && page == to && !dragging) return
         page = to
         run {
             // First open since the app started: build the player while it is still closed, let
@@ -384,7 +390,11 @@ fun PlayerSheet(
             return lerp(mini, full, p.coerceIn(0f, 1f))
         }
 
-        val miniBg = c.mini
+        // Frosted mini player: with an app layer to blur, the mini surface is see-through glass
+        // (tint chosen from the cover, see frostTint); without one it stays the old near-opaque colour.
+        val appLayer = LocalAppLayer.current
+        val miniFrost = androidx.compose.ui.graphics.rememberGraphicsLayer()
+        val miniBg = if (appLayer != null) frostTint(c.mini, true) else c.mini
 
         // 1. The surface: a floating card when collapsed, the whole screen when open. It is drawn
         // full size and clipped to the sheet's shape, so the blurred backdrop inside is drawn once
@@ -397,14 +407,52 @@ fun PlayerSheet(
                     // A new shape each frame moves the clip; the content underneath is not redrawn.
                     shape = SheetShape(sheetRect(p), mix(30f, 0f, p).coerceAtLeast(0f).dp.toPx())
                     clip = true
-                    shadowElevation = mix(10f, 0f, p).dp.toPx()
+                    shadowElevation = mix(22f, 0f, p).dp.toPx() // lifted: a mini player should float
                 },
         ) {
+            if (appLayer != null) Box(
+                Modifier.fillMaxSize().drawBehind {
+                    val p = ctrl.progress.value
+                    // Only the resting mini player is blurred: a growing sheet re-blurring each frame is what made opening lag.
+                    if (p > 0.01f) return@drawBehind
+                    val r = sheetRect(p)
+                    drawFrost(appLayer, miniFrost, r.left, r.top, r.left, r.top, r.width, r.height, 22.dp.toPx())
+                },
+            )
             Box(
                 Modifier.fillMaxSize()
                     // Cached as one texture, so scrolling the player page doesn't redraw the whole backdrop each frame.
                     .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
-                    .drawBehind { drawRect(lerp(miniBg, c.bg, ctrl.progress.value)) }
+                    .drawBehind {
+                        val p = ctrl.progress.value
+                        // The glass tint firms up to solid within the first 1% of the drag, so dropping the blur doesn't pop.
+                        val firm = miniBg.copy(alpha = miniBg.alpha + (1f - miniBg.alpha) * (p / 0.01f).coerceIn(0f, 1f))
+                        drawRect(lerp(firm, c.bg, p))
+                        // Depth while it rests: a soft light on top fading to a faint shade at the bottom,
+                        // and a hairline edge, so it reads as a raised pane rather than a flat strip.
+                        val lift = 1f - (p / 0.3f).coerceIn(0f, 1f)
+                        if (lift > 0f) {
+                            val r = sheetRect(p)
+                            drawRect(
+                                androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    0f to Color.White.copy(alpha = (if (c.dark) 0.10f else 0.50f) * lift),
+                                    0.55f to Color.Transparent,
+                                    1f to Color.Black.copy(alpha = (if (c.dark) 0.18f else 0.07f) * lift),
+                                    startY = r.top, endY = r.bottom,
+                                ),
+                                topLeft = androidx.compose.ui.geometry.Offset(r.left, r.top),
+                                size = androidx.compose.ui.geometry.Size(r.width, r.height),
+                            )
+                            val inset = 0.5.dp.toPx()
+                            drawRoundRect(
+                                (if (c.dark) Color.White.copy(alpha = 0.14f) else Color.White.copy(alpha = 0.70f)).copy(alpha = (if (c.dark) 0.14f else 0.70f) * lift),
+                                topLeft = androidx.compose.ui.geometry.Offset(r.left + inset, r.top + inset),
+                                size = androidx.compose.ui.geometry.Size(r.width - 2 * inset, r.height - 2 * inset),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(30.dp.toPx() - inset),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()),
+                            )
+                        }
+                    }
                     .backdrop { ctrl.progress.value },
             )
         }

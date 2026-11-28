@@ -309,7 +309,7 @@ fun NowPlayingPane(
                         }
                     }
                     CircleButton(Ic.Lyrics, "Lyrics", onLyrics, container = Color(0x59000000), content = Color.White)
-                    CircleButton(Ic.Menu, "More options", { menu = true }, container = Color(0x59000000), content = Color.White)
+                    CircleButton(Ic.More, "More options", { menu = true }, container = Color(0x59000000), content = Color.White)
                 }
                 // Video controls. They are drawn here, after the gesture layer, so they get the touches;
                 // the video itself is drawn by the player layer underneath this page.

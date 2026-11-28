@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+## Online 0.9.3.0
+- Fix: a quick double tap no longer opens a page twice or goes back two pages, runs a menu action twice, or closes a sheet twice
+- Smoother: tapping the dock's play button or the mini player again while the player is already opening no longer restarts the opening spring
+- Look: frosted glass. The dock, the mini player and the small title bar now blur the page under them, and the header panel is see-through. Their tint follows the album: lavender glass over a purple cover, more opaque where text needs it (real blur needs Android 12+; older versions get a plain, more opaque bar)
+- Look: in light mode a dark cover now gives a bright pastel background instead of muddy grey, with the same readable text
+- Look: the mini player floats a little higher, with a soft light on top and a fine edge
+- Look: the side menu is built like the pages (living background, rounded header panel, same cards)
+- Player: the ⋯ button at the top is a three-dot icon now (it was the menu icon); the queue's options button too
+- Smoother: opening the player no longer hitches, the hidden title bar no longer costs a layer per frame, and the lyrics preview on the player page only redraws when the line changes
+- Look: the seek bar is now an animated scene, tinted by the album: Minimal Wave+ (a fluid wave that pulses with the beat), Sakura Flow (petals on waves), Starry Horizon (parallax stars and shooting stars), Aurora Drift and Cosmic Orbit (a ringed planet, dust and a comet). The played part is a glowing wave with a knob riding its crest; drag to scrub as before. The old bars are still there as Classic Bars
+- Look: the big card at the top of Home is alive too. It follows the time of day (petals in the morning, waves in the afternoon, a ringed planet in the evening, stars at night), or matches your seek bar, and takes the album's colour. It pauses while you scroll or while the player covers it
+- Look: livelier, truer background colours. The glows now come from the cover's three most vivid, different hues (the old version averaged two halves, which turned colourful covers brown), and with no cover the page is tinted with your accent colour instead of plain grey
+- Settings: a Seekbar card with a live preview, a style picker, an Animation setting (Still, Calm, Normal, Lively) and a choice for the Home card. The page is grouped into Appearance, Music, Library and data, and About. Backups keep the new settings
+
 ## Online 0.9.2.2
 - Fix: lyrics subtitles over a video froze on one line; they now follow the song
 - Video: when no video is found for a song, "Pick a video" on the no-video dialog searches YouTube right in the player and remembers your choice for that song

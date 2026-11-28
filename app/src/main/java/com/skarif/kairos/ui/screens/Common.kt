@@ -359,14 +359,23 @@ fun rememberLivePosition(vm: MainViewModel): androidx.compose.runtime.State<Long
     }
 }
 
-/** Seek bar that reads the playback position itself, so only it redraws 5 times a second. */
+/** Seek bar that reads the playback position itself, so only it redraws 5 times a second. Which look it has is Settings > Seekbar. */
 @Composable
 fun LiveWaveformSeek(vm: MainViewModel, durationMs: Long, seed: Long, modifier: Modifier = Modifier, barsHeight: Dp = 66.dp, bars: Int = 26) {
     val pos = rememberLivePosition(vm)
     val now by vm.now.collectAsStateWithLifecycle()
     // The bars move only while playing *and* on screen; otherwise their frame clock stops.
     val visible = LocalPlayerVisible.current.value
-    com.skarif.kairos.ui.components.WaveformSeek(pos, durationMs, seed, vm::seekTo, modifier, barsHeight, bars, playing = now.isPlaying && visible)
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    if (settings.seekStyle == com.skarif.kairos.data.SeekStyle.BARS) {
+        com.skarif.kairos.ui.components.WaveformSeek(pos, durationMs, seed, vm::seekTo, modifier, barsHeight, bars, playing = now.isPlaying && visible)
+    } else {
+        // The lyrics page asks for a thin bar (28 dp of bars); the scene bar goes compact there.
+        com.skarif.kairos.ui.components.SceneSeek(
+            pos, durationMs, seed, vm::seekTo, settings.seekStyle, settings.seekMotion, modifier,
+            playing = now.isPlaying && visible, compact = barsHeight < 40.dp,
+        )
+    }
 }
 
 @Composable

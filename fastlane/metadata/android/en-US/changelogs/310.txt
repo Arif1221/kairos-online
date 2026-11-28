@@ -1,0 +1,6 @@
+• Animated seek bar scenes and a living Home card
+• Frosted glass dock, mini player and title bar, tinted by the album
+• Brighter backgrounds in light mode
+• New side menu to match the pages
+• Three-dot menu icon in the player
+• Smoother player opening

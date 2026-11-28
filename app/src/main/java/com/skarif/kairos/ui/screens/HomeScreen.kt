@@ -140,11 +140,13 @@ fun HomeScreen(
             // Right now: the mix for this time of day, on a card that changes colour with the hour.
             // Falls back to forgotten gems, then something never played, so it's never empty.
             val dayPart = remember(hour) { com.skarif.kairos.data.dayPart(hour) }
-            val rightNow = listOf("daylist", "forgotten", "never").firstNotNullOfOrNull { k -> byKey[k]?.takeIf { it.songs.size >= 3 } }
+            val picked = listOf("daylist", "forgotten", "never", "onrepeat", "most", "favourites", "recent", "quick").firstNotNullOfOrNull { k -> byKey[k]?.takeIf { it.songs.size >= 1 } }
+            // Last resort so the card is there on any library with songs: the library itself.
+            val rightNow = picked ?: songs.takeIf { it.isNotEmpty() }?.let { com.skarif.kairos.ui.Collection("library", "Your library", "${it.size} songs", it.take(40)) }
             if (rightNow != null) {
                 RightNowCard(
                     vm, rightNow, dayPart, Modifier.padding(horizontal = 18.dp),
-                    onOpen = { onOpenCollection(rightNow.key) },
+                    onOpen = { if (rightNow.key == "library") { vm.shuffleAll(songs); onOpenNowPlaying() } else onOpenCollection(rightNow.key) },
                     onPlay = { vm.play(rightNow.songs, 0, rightNow.title); onOpenNowPlaying() },
                 )
             }
@@ -355,53 +357,84 @@ private fun MixCard(vm: MainViewModel, m: Collection, card: androidx.compose.ui.
 }
 
 /**
- * "Right now": the mix for this part of the day. The card's light follows the clock (warm morning,
- * bright afternoon, violet evening, deep night), mixed with the album colour; a fan of three
- * covers on the right. Static drawing: one gradient and three thumbnails.
+ * "Right now": the mix for this part of the day, on the same animated scenes as the seek bar.
+ * By default the scene follows the clock (petals at sunrise, waves in the afternoon, a planet at
+ * dusk, stars at night) and takes the album's colour; Settings > Seekbar can make it match the
+ * seek bar's style instead. It moves only while on screen and not scrolling, and holds still
+ * when Animation is set to Still. The three covers float on the same clock.
  */
 @Composable
-private fun RightNowCard(
+internal fun RightNowCard(
     vm: MainViewModel, m: Collection, part: com.skarif.kairos.data.DayPart, modifier: Modifier,
     onOpen: () -> Unit, onPlay: () -> Unit,
 ) {
     val c = P.colors
     val menu = LocalCollectionMenu.current
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val now by vm.now.collectAsStateWithLifecycle()
     val sky = when (part) {
         com.skarif.kairos.data.DayPart.MORNING -> androidx.compose.ui.graphics.Color(0xFFF6A55B)
         com.skarif.kairos.data.DayPart.AFTERNOON -> androidx.compose.ui.graphics.Color(0xFF3FA7E0)
         com.skarif.kairos.data.DayPart.EVENING -> androidx.compose.ui.graphics.Color(0xFF7A45D8)
         com.skarif.kairos.data.DayPart.NIGHT -> androidx.compose.ui.graphics.Color(0xFF14204A)
     }
+    val timeStyle = when (part) {
+        com.skarif.kairos.data.DayPart.MORNING -> com.skarif.kairos.data.SeekStyle.SAKURA
+        com.skarif.kairos.data.DayPart.AFTERNOON -> com.skarif.kairos.data.SeekStyle.WAVE
+        com.skarif.kairos.data.DayPart.EVENING -> com.skarif.kairos.data.SeekStyle.COSMIC
+        com.skarif.kairos.data.DayPart.NIGHT -> com.skarif.kairos.data.SeekStyle.STARRY
+    }
+    val style = when {
+        settings.homeCardStyle == com.skarif.kairos.data.HomeCardStyle.TIME_OF_DAY -> timeStyle
+        settings.seekStyle == com.skarif.kairos.data.SeekStyle.BARS -> com.skarif.kairos.data.SeekStyle.WAVE
+        else -> settings.seekStyle
+    }
+    val lift = when (part) {
+        com.skarif.kairos.data.DayPart.MORNING -> 0.8f
+        com.skarif.kairos.data.DayPart.AFTERNOON -> 1f
+        com.skarif.kairos.data.DayPart.EVENING -> 0.3f
+        com.skarif.kairos.data.DayPart.NIGHT -> 0f
+    }
+    // The time of day sets the hue's mood, the album pulls it towards its own colour.
+    val accent = androidx.compose.ui.graphics.lerp(sky, c.accent, 0.5f)
+    val motion = settings.seekMotion
+    // Nothing to animate while the full player covers Home.
+    val ctrl = com.skarif.kairos.ui.player.LocalPlayer.current
+    val covered by androidx.compose.runtime.remember { androidx.compose.runtime.derivedStateOf { ctrl.progress.value > 0.001f } }
+    val clock = com.skarif.kairos.ui.components.rememberSceneClock(!covered, motion.speed * 0.6f, pauseOnScroll = true)
     val label = if (m.key == "daylist") "RIGHT NOW · ${part.label.uppercase()}" else "FOR YOU"
     Box(
         modifier.fillMaxWidth().height(176.dp)
             .cardClick("Open ${m.title}", onLongClick = { menu(m.key) }, onClick = onOpen)
-            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card))
-            .background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(sky, androidx.compose.ui.graphics.lerp(sky, c.accent, 0.6f), c.accent)))
-            .padding(18.dp),
+            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.card)),
     ) {
-        // Fan of covers, tilted like cards in a hand.
-        Box(Modifier.align(Alignment.CenterEnd).size(width = 130.dp, height = 120.dp)) {
+        com.skarif.kairos.ui.components.SceneBackdrop(
+            style, accent, lift, clock, motion, seed = m.key.hashCode().toLong(), playing = now.isPlaying,
+            modifier = Modifier.matchParentSize(),
+        )
+        // Fan of covers, tilted like cards in a hand, floating gently.
+        Box(Modifier.align(Alignment.CenterEnd).padding(end = 18.dp).size(width = 130.dp, height = 120.dp)) {
             m.songs.take(3).forEachIndexed { i, s ->
                 SongArt(
                     vm, s, 84.dp, corner = 18.dp,
                     modifier = Modifier.align(Alignment.Center).graphicsLayer {
-                        rotationZ = (i - 1) * 9f
+                        val bob = kotlin.math.sin(clock.value * 1.1f + i * 1.7f) * 3.dp.toPx()
+                        rotationZ = (i - 1) * 9f + kotlin.math.sin(clock.value * 0.8f + i) * 1.5f
                         translationX = (i - 1) * 20.dp.toPx()
-                        translationY = if (i == 1) -6.dp.toPx() else 0f
+                        translationY = (if (i == 1) -6.dp.toPx() else 0f) + bob
                         shadowElevation = 8.dp.toPx()
                         shape = RoundedCornerShape(18.dp)
                     }.zIndex(if (i == 1) 1f else 0f),
                 )
             }
         }
-        Column(Modifier.align(Alignment.TopStart).padding(end = 140.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(label, style = T.small.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp), color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.85f))
+        Column(Modifier.align(Alignment.TopStart).padding(top = 18.dp, start = 18.dp, end = 158.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(label, style = T.small.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp), color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.88f))
             Text(m.title, style = T.h2.copy(fontSize = 24.sp, lineHeight = 28.sp), color = androidx.compose.ui.graphics.Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text("${m.songs.size} songs", style = T.small, color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.8f))
+            Text("${m.songs.size} songs", style = T.small, color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.82f))
         }
         CircleButton(
-            Ic.Play, "Play ${m.title}", onPlay, modifier = Modifier.align(Alignment.BottomStart),
+            Ic.Play, "Play ${m.title}", onPlay, modifier = Modifier.align(Alignment.BottomStart).padding(start = 18.dp, bottom = 18.dp),
             container = androidx.compose.ui.graphics.Color.White, content = androidx.compose.ui.graphics.Color.Black,
         )
     }

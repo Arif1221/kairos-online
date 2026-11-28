@@ -330,6 +330,15 @@ fun ExploreScreen(
     fun play(songs: List<SongEntity>, i: Int, from: String) { vm.play(songs, i, from); onOpenNowPlaying() }
     val openItem: (OnlineItem) -> Unit = { open(vm, it, onOpenNowPlaying, nav) }
 
+    // The big card at the top of Home: a mix for this time of day, else what you played, else the Quick picks.
+    val heroPart = remember { com.skarif.kairos.data.dayPart(java.time.LocalTime.now().hour) }
+    val heroMix = remember(mixes, state) {
+        listOf("daylist", "forgotten", "never", "onrepeat", "most", "favourites", "lastplayed", "recent", "quick")
+            .firstNotNullOfOrNull { k -> mixes.firstOrNull { it.key == k }?.takeIf { it.songs.isNotEmpty() } }
+            ?: (state as? ExploreState.Ready)?.shelves?.firstOrNull { it.style == ShelfStyle.PICKS }
+                ?.items?.filterIsInstance<OnlineItem.Track>()?.map { it.song }?.takeIf { it.isNotEmpty() }
+                ?.let { com.skarif.kairos.ui.Collection("picks", "Quick picks", "", it) }
+    }
     ScreenBackground {
         LazyColumn(
             Modifier.fillMaxSize(),
@@ -358,6 +367,13 @@ fun ExploreScreen(
                         EXPLORE_MOODS.forEachIndexed { i, (label, _) -> Pill(label, { o.selectMood(i) }, selected = moodIndex == i) }
                     }
                 }
+            }
+            if (moodIndex < 0 && heroMix != null) item(key = "hero") {
+                RightNowCard(
+                    vm, heroMix, heroPart, Modifier.padding(horizontal = 18.dp),
+                    onOpen = { if (heroMix.key == "picks") onShelf("picks") else onOpenCollection(heroMix.key) },
+                    onPlay = { play(heroMix.songs, 0, heroMix.title) },
+                )
             }
             item(key = "hint") {
                 com.skarif.kairos.ui.components.HintCard(

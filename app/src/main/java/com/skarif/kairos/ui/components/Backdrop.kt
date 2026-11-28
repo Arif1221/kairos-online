@@ -22,6 +22,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -31,6 +33,7 @@ import androidx.compose.ui.graphics.ImageShader
 import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -50,6 +53,10 @@ import kotlinx.coroutines.withContext
  * box-blurred and colour-boosted once per song on a background thread, then drawn stretched
  * (two drifting textured rectangles). The dots are one tiny tile repeated by a shader. No
  * RenderEffect, no Crossfade, no per-frame colour filter, the same on every Android version.
+ *
+ * Colour: the glows come from the cover's three most vivid, distinct hues (see [coverTints]), not
+ * from an average, which turns a multi-coloured cover brown. With no cover (nothing playing, or a
+ * song with no art) the page isn't left flat grey: soft glows in the theme's accent colour take over.
  *
  * The motion clock ticks at about 30 fps, not at the display's rate: the drift is slow (periods
  * of 5 to 13 s), so 120 redraws a second of a full-screen, multi-layer backdrop bought nothing
@@ -74,6 +81,9 @@ class BackdropState {
     var tints by mutableStateOf<CoverTints?>(null)
         internal set
     var previousTints by mutableStateOf<CoverTints?>(null)
+        internal set
+    /** Average brightness of the current cover, 0 (black) to 1 (white). Frosted bars use it to pick their tint. */
+    var luma by mutableFloatStateOf(0.5f)
         internal set
     /**
      * Seconds of "living" motion: advances only while music plays, so the cover drifts and
@@ -146,7 +156,10 @@ fun rememberBackdrop(art: Bitmap?, enabled: Boolean, playing: Boolean = false, g
         // so drawing never runs a saturation filter over a full-screen texture again.
         val built = if (art == null || !enabled) null else withContext(Dispatchers.Default) {
             val tiny = blurredTiny(art)
-            saturated(tiny, if (dark) 1.55f else 1.25f) to coverTints(tiny)
+            // Light theme: lift the cover's brightness (keeping hue and saturation), so a dark cover
+            // becomes a bright pastel instead of a muddy grey-purple under the pale veil.
+            val shown = if (dark) tiny else lifted(tiny, LIGHT_FLOOR)
+            Triple(saturated(shown, if (dark) 1.55f else 1.25f), coverTints(tiny), lumaOf(shown))
         }
         val next = built?.first
         if (next === state.current) return@LaunchedEffect
@@ -154,6 +167,7 @@ fun rememberBackdrop(art: Bitmap?, enabled: Boolean, playing: Boolean = false, g
         state.previousTints = state.tints
         state.current = next
         state.tints = built?.second
+        state.luma = built?.third ?: 0.5f
         state.fade.snapTo(0f)
         state.fade.animateTo(1f, tween(600, easing = LinearEasing))
         state.previous = null
@@ -168,12 +182,28 @@ fun rememberBackdrop(art: Bitmap?, enabled: Boolean, playing: Boolean = false, g
  */
 @Composable
 fun ScreenBackground(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
+    val source = androidx.compose.ui.graphics.rememberGraphicsLayer()
+    val frost = androidx.compose.ui.graphics.rememberGraphicsLayer()
+    val glass = remember(source, frost) { GlassState(source, frost) }
     Box(modifier.fillMaxSize()) {
         // Offscreen: the backdrop is rendered into its own texture and only re-rendered when it
         // changes (motion tick, new cover). Without it Android re-executes all of its full-screen
         // draws on every frame of anything on top, such as a scrolling list, even while it is still.
         Box(Modifier.matchParentSize().graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }.backdrop())
-        content()
+        androidx.compose.runtime.CompositionLocalProvider(LocalGlass provides glass) {
+            // The page is recorded into a layer only while the small title bar is showing (it is the
+            // only thing that reads it). While hidden the page draws straight, as before the glass bar.
+            Box(
+                Modifier.matchParentSize().drawWithContent {
+                    if (glass.title != null && glass.showBar) {
+                        source.record { this@drawWithContent.drawContent() }
+                        drawLayer(source)
+                    } else drawContent()
+                },
+                content = content,
+            )
+            if (glass.title != null) GlassTitleBar(glass)
+        }
     }
 }
 
@@ -191,19 +221,28 @@ fun Modifier.backdrop(alpha: () -> Float = { 1f }): Modifier {
         // into the cover bitmap, see rememberBackdrop.)
         // Pure black is the theme with the darkest wash; keep enough contrast while letting colour waves show.
         val pure = c.bg == Color.Black
+        // With no cover to take colour from, the theme accent tints the page instead (not on pure black, whose point is no light).
+        val ambient = ambientTints(c.accent)
         onDrawBehind {
             val a = alpha().coerceIn(0f, 1f)
             if (a <= 0f) return@onDrawBehind
             drawRect(c.bg, alpha = a)
             val cur = state.current
-            if (state.enabled && (cur != null || state.previous != null)) {
+            val hasCover = cur != null || state.previous != null
+            if (state.enabled && (hasCover || !pure)) {
                 val f = state.fade.value
                 val t = state.phase
-                state.previous?.let { drawCover(it, a * (1f - f), t) }
-                cur?.let { drawCover(it, a * f, t) }
-                // Soft colour glows from the cover, drifting slowly, under the veil so text stays readable.
-                state.previousTints?.let { drawTints(it, a * (1f - f), t, c.dark, state.glow) }
-                state.tints?.let { drawTints(it, a * f, t, c.dark, state.glow) }
+                if (hasCover) {
+                    // The first cover fades in over the idle glow instead of the glow vanishing first.
+                    if (state.previous == null && !pure) drawTints(ambient, a * (1f - f), t, c.dark, state.glow, 0.75f)
+                    state.previous?.let { drawCover(it, a * (1f - f), t) }
+                    cur?.let { drawCover(it, a * f, t) }
+                    // Soft colour glows from the cover, drifting slowly, under the veil so text stays readable.
+                    state.previousTints?.let { drawTints(it, a * (1f - f), t, c.dark, state.glow) }
+                    state.tints?.let { drawTints(it, a * f, t, c.dark, state.glow) }
+                } else {
+                    drawTints(ambient, a, t, c.dark, state.glow, 0.75f)
+                }
                 if (c.dark) {
                     // A thin veil so the cover's colour can bloom through. It stays heavier only at
                     // the top and bottom edges, where the status bar, titles and dock need contrast.
@@ -262,53 +301,99 @@ private fun DrawScope.drawCover(img: ImageBitmap, alpha: Float, t: Float = 0f, f
     }
 }
 
-/** Two vivid colours from a cover: the weighted average of its upper-left and lower-right halves. */
+/** Three glow colours: the cover's main hue, a second and a third. */
 @Stable
-class CoverTints(val a: Color, val b: Color)
+class CoverTints(val a: Color, val b: Color, val c: Color = b)
+
+private const val HUE_BINS = 12
+
+/** [c] with its hue turned by [degrees]. */
+private fun hueShifted(c: Color, degrees: Float): Color {
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(c.toArgb(), hsv)
+    hsv[0] = ((hsv[0] + degrees) % 360f + 360f) % 360f
+    return Color(android.graphics.Color.HSVToColor(hsv))
+}
+
+/** Makes a picked colour glow-ready: a little more saturated, never dark. */
+private fun finishTint(rgb: Int): Color {
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(rgb, hsv)
+    hsv[1] = (hsv[1] * 1.2f).coerceAtMost(1f)
+    hsv[2] = hsv[2].coerceIn(0.6f, 1f)
+    return Color(android.graphics.Color.HSVToColor(hsv))
+}
 
 /**
- * Picks two glow colours from the small blurred cover. Each pixel counts by how vivid and bright it
- * is, so a mostly dark or grey cover still gives its one bright accent instead of mud.
+ * Picks up to three glow colours from the small blurred cover by hue. Pixels are sorted into 12
+ * hue buckets, each pixel counting by how vivid it is (squared, so a dull mass can't outvote a
+ * small bright accent). The heaviest bucket is the first colour; the second and third are the
+ * heaviest buckets at least two steps (60 degrees) away from the ones already taken, so the glows are
+ * truly different colours instead of three shades of one. A cover with only one hue gets its
+ * neighbours on the colour wheel instead. The old version averaged the cover's two halves, which
+ * turned any multi-coloured cover into the same muddy brown.
  */
 internal fun coverTints(img: ImageBitmap): CoverTints {
     val w = img.width
     val h = img.height
     val px = IntArray(w * h)
     img.readPixels(px)
-    val sum = Array(2) { DoubleArray(4) } // r, g, b, weight for each half
+    val wt = DoubleArray(HUE_BINS)
+    val sr = DoubleArray(HUE_BINS)
+    val sg = DoubleArray(HUE_BINS)
+    val sb = DoubleArray(HUE_BINS)
     val hsv = FloatArray(3)
-    for (y in 0 until h) for (x in 0 until w) {
-        val p = px[y * w + x]
+    for (p in px) {
         android.graphics.Color.colorToHSV(p, hsv)
-        val wt = (hsv[1] * hsv[2]).toDouble() + 0.02
-        val g = if (x * h + y * w < w * h) 0 else 1 // above or below the anti-diagonal
-        sum[g][0] += ((p shr 16) and 255) * wt
-        sum[g][1] += ((p shr 8) and 255) * wt
-        sum[g][2] += (p and 255) * wt
-        sum[g][3] += wt
+        val vivid = (hsv[1] * hsv[2]).toDouble()
+        val weight = vivid * vivid + 0.005
+        val bin = ((hsv[0] / 360f) * HUE_BINS).toInt().coerceIn(0, HUE_BINS - 1)
+        wt[bin] += weight
+        sr[bin] += ((p shr 16) and 255) * weight
+        sg[bin] += ((p shr 8) and 255) * weight
+        sb[bin] += (p and 255) * weight
     }
-    fun tint(g: DoubleArray): Color {
-        if (g[3] <= 0.0) return Color.Transparent
-        val rgb = android.graphics.Color.rgb((g[0] / g[3]).toInt(), (g[1] / g[3]).toInt(), (g[2] / g[3]).toInt())
-        android.graphics.Color.colorToHSV(rgb, hsv)
-        hsv[1] = (hsv[1] * 1.2f).coerceAtMost(1f)
-        hsv[2] = hsv[2].coerceIn(0.55f, 1f)
-        return Color(android.graphics.Color.HSVToColor(hsv))
-    }
-    return CoverTints(tint(sum[0]), tint(sum[1]))
+    fun bucket(i: Int): Color =
+        if (wt[i] <= 0.0) Color.Transparent
+        else finishTint(android.graphics.Color.rgb((sr[i] / wt[i]).toInt(), (sg[i] / wt[i]).toInt(), (sb[i] / wt[i]).toInt()))
+    fun apart(i: Int, j: Int): Boolean { val d = kotlin.math.abs(i - j); return minOf(d, HUE_BINS - d) >= 2 }
+    val first = wt.indices.maxByOrNull { wt[it] } ?: 0
+    val second = wt.indices.filter { apart(it, first) }.maxByOrNull { wt[it] }
+    val third = if (second == null) null else wt.indices.filter { apart(it, first) && apart(it, second) }.maxByOrNull { wt[it] }
+    val a = bucket(first)
+    val min = wt[first] * 0.12 // a hue that barely appears isn't worth a glow
+    val b = if (second != null && wt[second] > min) bucket(second) else hueShifted(a, 32f)
+    val c = if (third != null && wt[third] > min) bucket(third) else hueShifted(a, -32f)
+    return CoverTints(a, b, c)
 }
 
-/** Two big, soft radial glows on slow Lissajous paths; they move only while music plays ([t] stands still on pause). */
-private fun DrawScope.drawTints(tints: CoverTints, alpha: Float, t: Float, dark: Boolean, glow: Float) {
+/** Glow colours from the theme accent alone: the accent and its two neighbours on the colour wheel. */
+internal fun ambientTints(accent: Color): CoverTints {
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(accent.toArgb(), hsv)
+    val s = if (hsv[1] < 0.12f) hsv[1] else hsv[1].coerceAtLeast(0.45f)
+    val v = hsv[2].coerceIn(0.6f, 1f)
+    fun at(d: Float) = Color(android.graphics.Color.HSVToColor(floatArrayOf(((hsv[0] + d) % 360f + 360f) % 360f, s, v)))
+    return CoverTints(at(0f), at(40f), at(-40f))
+}
+
+/**
+ * Three big, soft radial glows on slow Lissajous paths; they move only while music plays ([t] stands
+ * still on pause). [boost] scales the strength (the no-cover glows are a little quieter).
+ */
+private fun DrawScope.drawTints(tints: CoverTints, alpha: Float, t: Float, dark: Boolean, glow: Float, boost: Float = 1f) {
     if (alpha <= 0f) return
     val tau = 2f * PI.toFloat()
     // Less glow setting = heavier veil = quieter tints.
-    val strength = (if (dark) 0.42f else 0.30f) * (0.4f + 0.6f * glow) * alpha
+    val strength = (if (dark) 0.42f else 0.30f) * (0.4f + 0.6f * glow) * alpha * boost
     val r = maxOf(size.width, size.height) * 0.8f
     val c1 = Offset(size.width * (0.28f + 0.22f * sin(t * tau / 13f)), size.height * (0.22f + 0.14f * sin(t * tau / 9f + 1.1f)))
     val c2 = Offset(size.width * (0.74f + 0.20f * sin(t * tau / 11f + 2.3f)), size.height * (0.78f + 0.14f * sin(t * tau / 8f + 0.4f)))
+    val c3 = Offset(size.width * (0.55f + 0.28f * sin(t * tau / 12f + 4f)), size.height * (0.50f + 0.20f * sin(t * tau / 10f + 2f)))
     drawCircle(brush = Brush.radialGradient(listOf(tints.a.copy(alpha = strength), Color.Transparent), center = c1, radius = r), radius = r, center = c1)
     drawCircle(brush = Brush.radialGradient(listOf(tints.b.copy(alpha = strength), Color.Transparent), center = c2, radius = r), radius = r, center = c2)
+    // The third colour sits in the middle, where text is, so it is the quietest.
+    drawCircle(brush = Brush.radialGradient(listOf(tints.c.copy(alpha = strength * 0.6f), Color.Transparent), center = c3, radius = r * 0.85f), radius = r * 0.85f, center = c3)
 }
 
 private fun dotTile(step: Int, radius: Float, color: Color): ImageBitmap {
@@ -317,6 +402,33 @@ private fun dotTile(step: Int, radius: Float, color: Color): ImageBitmap {
     val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { this.color = android.graphics.Color.argb((color.alpha * 255).toInt(), (color.red * 255).toInt(), (color.green * 255).toInt(), (color.blue * 255).toInt()) }
     canvas.drawCircle(step / 2f, step / 2f, radius, paint)
     return bmp.asImageBitmap()
+}
+
+/** Light theme: the darkest a cover pixel may be (HSV value, 0..1). Raise for brighter, lower for more contrast. */
+private const val LIGHT_FLOOR = 0.66f
+
+/** [img] with HSV value remapped from 0..1 to [floor]..1: hue and saturation stay, darkness goes. */
+internal fun lifted(img: ImageBitmap, floor: Float): ImageBitmap {
+    val w = img.width
+    val h = img.height
+    val px = IntArray(w * h)
+    img.readPixels(px)
+    val hsv = FloatArray(3)
+    for (i in px.indices) {
+        android.graphics.Color.colorToHSV(px[i], hsv)
+        hsv[2] = floor + (1f - floor) * hsv[2]
+        px[i] = android.graphics.Color.HSVToColor(px[i] ushr 24, hsv)
+    }
+    return Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888).asImageBitmap()
+}
+
+/** Mean brightness of [img], 0..1 (Rec. 709 weights). */
+internal fun lumaOf(img: ImageBitmap): Float {
+    val px = IntArray(img.width * img.height)
+    img.readPixels(px)
+    var sum = 0.0
+    for (p in px) sum += 0.2126 * ((p shr 16) and 255) + 0.7152 * ((p shr 8) and 255) + 0.0722 * (p and 255)
+    return (sum / px.size / 255.0).toFloat()
 }
 
 /** [img] with its saturation scaled by [amount] (1 = unchanged), same luminance weights as ColorMatrix.setToSaturation. */

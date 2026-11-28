@@ -1,5 +1,8 @@
 package com.skarif.kairos.ui.screens
 
+import com.skarif.kairos.ui.components.backdrop
+import com.skarif.kairos.ui.components.headerPanel
+
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.graphicsLayer
@@ -131,7 +134,7 @@ fun QueuePane(vm: MainViewModel, onBack: () -> Unit, onSaveAsPlaylist: () -> Uni
                 CircleButton(Ic.PlaylistAdd, "Save queue as playlist", onSaveAsPlaylist, size = 48.dp)
                 Spacer(Modifier.size(8.dp))
                 Box {
-                    CircleButton(Ic.Menu, "Queue options", { overflow = true }, size = 48.dp)
+                    CircleButton(Ic.More, "Queue options", { overflow = true }, size = 48.dp)
                     androidx.compose.material3.DropdownMenu(
                         expanded = overflow, onDismissRequest = { overflow = false },
                         containerColor = c.sheet, shape = RoundedCornerShape(20.dp),
@@ -547,7 +550,7 @@ fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> U
                 Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
-                    .background(c.card.copy(alpha = if (c.dark) 0.72f else 0.90f))
+                    .background(c.card.copy(alpha = if (c.dark) 0.85f else 0.92f)) // same as the pages' cards
                     .border(1.dp, c.line.copy(alpha = if (c.dark) 0.35f else 0.25f), RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item)),
             ) {
                 items.forEachIndexed { idx, item ->
@@ -584,48 +587,52 @@ fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> U
 
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color(0x6B000000)).clickable(onClickLabel = "Close menu", onClick = onClose))
+        // Built like every page: the living cover backdrop, a rounded header panel, then cards.
         Column(
             Modifier
                 .fillMaxSize()
                 .padding(end = 64.dp)
                 .clip(RoundedCornerShape(topEnd = 38.dp, bottomEnd = 38.dp))
-                .background(c.sheet)
-                .verticalScroll(rememberScrollState(), flingBehavior = com.skarif.kairos.ui.motion.rememberIosFling())
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .backdrop(),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                CircleButton(Ic.Close, "Close menu", onClose, size = 42.dp, container = c.chip, content = c.text)
-                Column(Modifier.weight(1f)) {
-                    Text(mixedHeadline("Kairos " to false, if (vm.onlineName != null) "Online" to true else "Music" to true), style = T.h1.copy(fontSize = 24.sp), color = c.text)
-                }
-            }
-
-            cur?.let { song ->
-                val src = if (song.volume == com.skarif.kairos.data.db.ONLINE_VOLUME) "Online" else "Offline"
-                val media = if (now.videoActive) "Video" else "Audio"
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
-                        .background(c.accent)
-                        .clickable(role = Role.Button, onClickLabel = "Open now playing") { onNavigate("now") }
-                        .padding(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    SongArt(vm, song, 48.dp, corner = 14.dp)
+            Column(Modifier.headerPanel(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CircleButton(Ic.Close, "Close menu", onClose, size = 42.dp, container = c.chip, content = c.text)
                     Column(Modifier.weight(1f)) {
-                        Text("$media · $src".uppercase(), style = T.kicker.copy(fontSize = 9.sp), color = c.onAccent.copy(alpha = 0.8f))
-                        Text(song.title, style = T.title, color = c.onAccent, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(song.artist, style = T.small, color = c.onAccent.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(mixedHeadline("Kairos " to false, if (vm.onlineName != null) "Online" to true else "Music" to true), style = T.h1.copy(fontSize = 24.sp), color = c.text)
                     }
-                    CircleButton(if (now.isPlaying) Ic.Pause else Ic.Play, if (now.isPlaying) "Pause" else "Play", vm::toggle, size = 42.dp, container = c.ink, content = c.inkFg)
+                }
+                cur?.let { song ->
+                    val src = if (song.volume == com.skarif.kairos.data.db.ONLINE_VOLUME) "Online" else "Offline"
+                    val media = if (now.videoActive) "Video" else "Audio"
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
+                            .background(c.accent)
+                            .clickable(role = Role.Button, onClickLabel = "Open now playing") { onNavigate("now") }
+                            .padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        SongArt(vm, song, 48.dp, corner = 14.dp)
+                        Column(Modifier.weight(1f)) {
+                            Text("$media · $src".uppercase(), style = T.kicker.copy(fontSize = 9.sp), color = c.onAccent.copy(alpha = 0.8f))
+                            Text(song.title, style = T.title, color = c.onAccent, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(song.artist, style = T.small, color = c.onAccent.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        CircleButton(if (now.isPlaying) Ic.Pause else Ic.Play, if (now.isPlaying) "Pause" else "Play", vm::toggle, size = 42.dp, container = c.ink, content = c.inkFg)
+                    }
                 }
             }
-
+            Column(
+                Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState(), flingBehavior = com.skarif.kairos.ui.motion.rememberIosFling())
+                    .navigationBarsPadding()
+                    .padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
             DrawerGroup("BROWSE", browse)
             DrawerGroup(if (vm.onlineName != null) "ONLINE & OFFLINE" else "LIBRARY", sources)
             DrawerGroup("PLAYBACK & TOOLS", tools)
@@ -643,6 +650,7 @@ fun MenuDrawer(vm: MainViewModel, onClose: () -> Unit, onNavigate: (String) -> U
                 )
             }
             Box(Modifier.width(1.dp).height(8.dp))
+            }
         }
     }
 }
