@@ -124,7 +124,9 @@ fun VideoLayer(vm: MainViewModel, fill: Boolean, showSubtitles: Boolean = true, 
             if (!now.isPlaying) break
             // The glow behind a fitted picture drifts slowly; every 2.5 s is enough (it was every 1.2 s,
             // each one a synchronous read-back of the video texture on the UI thread).
-            delay(2_500)
+            // getBitmap copies the frame from the GPU on the UI thread, which can hitch weaker phones,
+            // so it runs rarely: the glow only needs to follow the picture's overall colour.
+            delay(8_000)
         } while (true)
     }
 

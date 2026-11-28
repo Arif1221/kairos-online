@@ -329,6 +329,18 @@ class PlaybackService : MediaSessionService() {
         override fun onVideoInputFormatChanged(eventTime: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: DecoderReuseEvaluation?) {
             android.util.Log.i("KairosVideo", "video format: ${format.sampleMimeType} ${format.width}x${format.height} ${format.codecs}")
         }
+        // Throttling vs decoding: a low or falling kbps with BUFFERING lines means the network side;
+        // healthy kbps with dropped frames means the device (decode or drawing) side.
+        override fun onBandwidthEstimate(eventTime: AnalyticsListener.EventTime, totalLoadTimeMs: Int, totalBytesLoaded: Long, bitrateEstimate: Long) {
+            val bufMs = eventTime.timeline.takeIf { !it.isEmpty }?.let { session?.player?.bufferedPosition?.minus(session?.player?.currentPosition ?: 0L) }
+            android.util.Log.i("KairosVideo", "net: ${bitrateEstimate / 1000} kbps (${totalBytesLoaded / 1024} KB in $totalLoadTimeMs ms) buffered ahead=${bufMs ?: -1} ms")
+        }
+        override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
+            android.util.Log.w("KairosVideo", "dropped $droppedFrames frames in $elapsedMs ms")
+        }
+        override fun onPlaybackStateChanged(eventTime: AnalyticsListener.EventTime, state: Int) {
+            if (state == Player.STATE_BUFFERING) android.util.Log.w("KairosVideo", "BUFFERING (stall or startup)")
+        }
         override fun onVideoCodecError(eventTime: AnalyticsListener.EventTime, videoCodecError: Exception) {
             android.util.Log.w("KairosVideo", "video codec error", videoCodecError)
         }

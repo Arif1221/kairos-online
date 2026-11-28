@@ -1103,7 +1103,7 @@ fun SpotifyImportScreen(vm: MainViewModel, onBack: () -> Unit, onOpenPlaylist: (
                     SearchField(link, { link = it }, "https://open.spotify.com/playlist/…", height = 52.dp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Pill("Paste", { clipboard.getText()?.text?.let { link = it.trim() } }, icon = Ic.PlaylistAdd)
-                        val busy = state is com.skarif.kairos.ui.OnlineFeatures.ImportState.Reading || state is com.skarif.kairos.ui.OnlineFeatures.ImportState.Matching
+                        val busy = state is com.skarif.kairos.ui.OnlineFeatures.ImportState.Reading || state is com.skarif.kairos.ui.OnlineFeatures.ImportState.Reading2 || state is com.skarif.kairos.ui.OnlineFeatures.ImportState.Matching
                         Pill(if (busy) "Stop" else "Import", { if (busy) o.resetImport() else o.importSpotify(link) }, selected = true, icon = if (busy) Ic.Close else Ic.DownArrow)
                     }
                 }
@@ -1112,10 +1112,12 @@ fun SpotifyImportScreen(vm: MainViewModel, onBack: () -> Unit, onOpenPlaylist: (
                 Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     when (val st = state) {
                         com.skarif.kairos.ui.OnlineFeatures.ImportState.Idle -> Text(
-                            "Spotify shares the first 100 songs of a playlist this way. Bigger ones come in cut short.",
+                            "Paste a public playlist or album link. Long playlists are read in full when Spotify allows it.",
                             style = T.small, color = c.muted,
                         )
                         com.skarif.kairos.ui.OnlineFeatures.ImportState.Reading -> Text("Reading the playlist from Spotify…", style = T.body, color = c.text)
+                        is com.skarif.kairos.ui.OnlineFeatures.ImportState.Reading2 ->
+                            Text("Reading the playlist from Spotify: ${st.read} of ${st.total}…", style = T.body, color = c.text)
                         is com.skarif.kairos.ui.OnlineFeatures.ImportState.Matching -> {
                             Text(st.name, style = T.h2, color = c.text)
                             Text("Finding songs: ${st.done} of ${st.total} · ${st.found} found", style = T.body, color = c.muted)
@@ -1125,7 +1127,7 @@ fun SpotifyImportScreen(vm: MainViewModel, onBack: () -> Unit, onOpenPlaylist: (
                             Text(st.name, style = T.h2, color = c.text)
                             Text(
                                 "Made a playlist with ${st.found} of ${st.total} songs." +
-                                    if (st.maybeCut) " Spotify only shared the first 100." else "",
+                                    if (st.maybeCut) " Spotify only shared the first 100 this time." else "",
                                 style = T.body, color = c.muted,
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

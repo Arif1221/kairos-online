@@ -871,6 +871,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         minimizeVideoGraceJob?.cancel()
         videoPreferred.value = on
         videoWanted.value = on
+        // Back to Audio on purpose: the "no video" card on the cover has done its job.
+        if (!on) _videoFellBack.value = false
     }
 
     /**

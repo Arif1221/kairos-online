@@ -314,30 +314,42 @@ fun NowPlayingPane(
                     CircleButton(Ic.Lyrics, "Lyrics", onLyrics, container = Color(0x59000000), content = Color.White)
                     CircleButton(Ic.More, "More options", { menu = true }, container = Color(0x59000000), content = Color.White)
                 }
-                var noVideoNote by remember(s.id) { androidx.compose.runtime.mutableStateOf(false) }
-                LaunchedEffect(videoFellBack, s.id) {
-                    noVideoNote = videoFellBack
-                    if (videoFellBack) { kotlinx.coroutines.delay(6_000); noVideoNote = false }
-                }
+                // Video is on but this song has none (or the lookup failed): the cover keeps the artwork,
+                // and a card on it says so and offers the way out. It stays until the song changes, a video
+                // turns up, or the listener goes back to Audio (it used to be a 6 s toast that was easy to miss).
                 androidx.compose.animation.AnimatedVisibility(
-                    visible = noVideoNote && showToggle,
-                    modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 70.dp),
+                    visible = videoFellBack && showToggle,
+                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 28.dp),
                     enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(220)) +
-                        androidx.compose.animation.slideInVertically(androidx.compose.animation.core.tween(260)) { -it / 2 },
-                    exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(400)),
+                        androidx.compose.animation.scaleIn(androidx.compose.animation.core.tween(260), initialScale = 0.92f),
+                    exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(200)),
                 ) {
-                    Row(
-                        Modifier.clip(androidx.compose.foundation.shape.CircleShape).background(Color(0xB3000000))
-                            .border(1.dp, Color.White.copy(alpha = 0.14f), androidx.compose.foundation.shape.CircleShape)
-                            .clickable(role = Role.Button) { noVideoNote = false; videoHelp = videoState }
-                            .padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    val failed = videoState is VideoState.Error
+                    Column(
+                        Modifier.clip(RoundedCornerShape(24.dp)).background(Color(0xB3000000))
+                            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(24.dp))
+                            .padding(horizontal = 22.dp, vertical = 18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Text("No video for this song", style = T.small.copy(fontWeight = FontWeight.SemiBold), color = Color.White)
-                        Box(
-                            Modifier.clip(androidx.compose.foundation.shape.CircleShape).background(P.colors.accent).padding(horizontal = 12.dp, vertical = 5.dp),
-                        ) { Text("Find video", style = T.small.copy(fontWeight = FontWeight.Bold), color = P.colors.onAccent) }
+                        Icon(Ic.Video, null, tint = Color.White, modifier = Modifier.size(26.dp))
+                        Text(
+                            if (failed) "Couldn't check for a video" else "No video for this song",
+                            style = T.small.copy(fontWeight = FontWeight.Bold), color = Color.White, textAlign = TextAlign.Center,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier.clip(androidx.compose.foundation.shape.CircleShape).background(P.colors.accent)
+                                    .clickable(role = Role.Button) { videoPicker = true }
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                            ) { Text("Find video", style = T.small.copy(fontWeight = FontWeight.Bold), color = P.colors.onAccent) }
+                            if (failed) Box(
+                                Modifier.clip(androidx.compose.foundation.shape.CircleShape)
+                                    .border(1.dp, Color.White.copy(alpha = 0.35f), androidx.compose.foundation.shape.CircleShape)
+                                    .clickable(role = Role.Button) { vm.retryVideoCheck(s) }
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                            ) { Text("Retry", style = T.small.copy(fontWeight = FontWeight.SemiBold), color = Color.White) }
+                        }
                     }
                 }
                 // Video controls. They are drawn here, after the gesture layer, so they get the touches;

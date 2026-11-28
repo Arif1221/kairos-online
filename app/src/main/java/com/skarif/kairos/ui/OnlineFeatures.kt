@@ -457,6 +457,8 @@ class OnlineFeatures(
     sealed interface ImportState {
         data object Idle : ImportState
         data object Reading : ImportState
+        /** Reading a long playlist page by page. */
+        data class Reading2(val read: Int, val total: Int) : ImportState
         data class Matching(val name: String, val done: Int, val total: Int, val found: Int) : ImportState
         data class Done(
             val name: String, val playlistId: Long, val found: Int, val total: Int,
@@ -495,7 +497,13 @@ class OnlineFeatures(
                     } finally {
                         conn.disconnect()
                     }
-                    com.skarif.kairos.online.SpotifyImport.parse(html)
+                    val first = com.skarif.kairos.online.SpotifyImport.parse(html)
+                    // Playlists past the embed's 100: read the rest with the page's own anonymous token.
+                    if (target.first == "playlist") {
+                        com.skarif.kairos.online.SpotifyImport.fetchAll(target.second, html, first) { n, total ->
+                            _import.value = ImportState.Reading2(n, total)
+                        }
+                    } else first
                 }
                 if (list.tracks.isEmpty()) error("That playlist is empty, or private.")
                 // Songs on this phone, by matching key, for the first pass.

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## Online 0.9.3.7
+
+- Spotify import: pasting a playlist link now reads the whole playlist, not just the first 100 songs. It uses the anonymous token on Spotify's embed page and pages through the web player's playlist query; if any step fails it falls back to the first 100 and says so. Unofficial, and Spotify can change it
+- Video: when a song has no video, the cover now shows a "No video for this song" card with Find video (and Retry after a failed lookup). It stays until the song changes, a video turns up, or you switch to Audio (it was a 6 s toast)
+- Light theme: the seek bar scenes are easier to see. The sky is darker than the page behind it, hills, pines and branches use a deeper tint, the moon and stars are deeper, the unplayed part is dimmed and the outline is stronger. Dark theme is unchanged
+- Seek bar: a little taller in the full player (84 dp, was 72 dp)
+- Smoother video: the seek bar scene redraws at about 30 fps while a video plays, and the glow behind a fitted picture reads the video every 8 s (was 2.5 s)
+- Diagnostics: the log (tag KairosVideo) now shows download speed, buffer ahead, stalls and dropped frames while video plays
+
 ## Online 0.9.3.6
 
 - Smoother video: the player's buffer is capped at 48 MB (it was sized for about 125 MB of video), which means less memory use and fewer garbage-collection pauses during video; playback starts after 1.5 s of data and resumes after a stall at 3.5 s

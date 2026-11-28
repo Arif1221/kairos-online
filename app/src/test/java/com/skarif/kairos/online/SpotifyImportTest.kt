@@ -26,4 +26,27 @@ class SpotifyImportTest {
         assertEquals("yesterday", SpotifyImport.key("Yesterday - Remastered 2009"))
         assertEquals("tum hi ho", SpotifyImport.key("Tum Hi Ho"))
     }
+
+    @Test fun readsTokenAndHash() {
+        val html = """<html><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"state":{"settings":{"session":{"accessToken":"tok123"}}}}}}</script></html>"""
+        assertEquals("tok123", SpotifyImport.accessToken(html))
+        assertNull(SpotifyImport.accessToken("<html></html>"))
+        val h = "a".repeat(64)
+        assertEquals(h, SpotifyImport.findPlaylistHash("x=n(\"fetchPlaylist\",\"query\",\"$h\",null)"))
+        assertNull(SpotifyImport.findPlaylistHash("nothing here"))
+    }
+
+    @Test fun parsesPlaylistPage() {
+        val body = """{"data":{"playlistV2":{"content":{"totalCount":250,"items":[
+            {"itemV2":{"data":{"name":"Babydoll","trackDuration":{"totalMilliseconds":178822},
+              "artists":{"items":[{"profile":{"name":"Jamie Miller"}},{"profile":{"name":"X"}}]}}}},
+            {"itemV2":{"data":{"name":"Old","albumOfTrack":{"artists":{"items":[{"profile":{"name":"Pitbull"}}]}}}}},
+            {"itemV2":{"data":{}}}]}}}}"""
+        val page = SpotifyImport.parsePage(body)!!
+        assertEquals(250, page.total)
+        assertEquals(2, page.tracks.size)
+        assertEquals(SpotifyImport.Track("Babydoll", "Jamie Miller, X", 178822), page.tracks[0])
+        assertEquals("Pitbull", page.tracks[1].artist)
+        assertNull(SpotifyImport.parsePage("not json"))
+    }
 }

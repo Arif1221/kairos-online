@@ -1,0 +1,4 @@
+• Spotify import reads whole playlists, not just the first 100
+• No video? The cover offers Find video
+• Light theme seek bar is easier to see, and a little taller
+• Smoother video: lighter seek bar animation and glow

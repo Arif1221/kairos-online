@@ -381,6 +381,7 @@ fun LiveWaveformSeek(vm: MainViewModel, durationMs: Long, seed: Long, modifier: 
         com.skarif.kairos.ui.components.SceneSeek(
             pos, durationMs, seed, vm::seekTo, settings.seekStyle, settings.seekMotion, modifier,
             playing = now.isPlaying && visible, compact = barsHeight < 40.dp,
+            halfRate = now.videoActive,
         )
     }
 }

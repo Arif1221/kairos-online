@@ -117,6 +117,8 @@ class ScenePalette(
     val cool: Color,
     /** The bright line along the played wave: white at night, a deeper tint of the accent by day. */
     val edge: Color = Color.White,
+    /** Silhouettes (hills, pines, branches). Night: the sky's own dark tint. Day: a deep tint of the accent, so they read against a pale sky. */
+    val ink: Color = deep,
     /** Light theme: a pale sky, so waves, the played part, the outline and the knob are drawn stronger. */
     val day: Boolean = false,
 )
@@ -145,9 +147,10 @@ fun scenePalette(accent: Color, lift: Float = 0f, blend: Color = Color.Unspecifi
     if (day) {
         // Light theme: a daytime sky, pale at the horizon and a soft tint above it, with the waves a
         // little deeper so they still read against it. White clouds, petals and stars stay visible high up.
-        deep = hsv(h, if (neutral) s else s * 0.46f, 0.88f)
-        mid = hsv(h, if (neutral) s else s * 0.22f, 0.98f)
-        if (blend != Color.Unspecified) { deep = lerp(deep, blend, 0.08f); mid = lerp(mid, blend, 0.16f) }
+        // Darker and more saturated than the page behind it (and no longer pulled towards the page
+        // colour), so the bar separates from the player background instead of melting into it.
+        deep = hsv(h, if (neutral) s else s * 0.55f, 0.80f)
+        mid = hsv(h, if (neutral) s else s * 0.28f, 0.95f)
     }
     return ScenePalette(
         deep = deep,
@@ -155,14 +158,15 @@ fun scenePalette(accent: Color, lift: Float = 0f, blend: Color = Color.Unspecifi
         base = when { day -> hsv(h, (s * 1.05f).coerceAtMost(1f), 0.74f); appNight -> hsv(h, s * 0.85f, 0.88f); else -> hsv(h, s, 0.92f) },
         glow = if (day) hsv(h, s * 0.85f, 0.90f) else hsv(h, s * 0.55f, 1f),
         // By day the near-white of stars, petals and the moon would vanish on the pale sky: a deeper tint.
-        hi = if (day) lerp(hsv(h, s * 0.55f, 0.84f), Color.White, 0.12f) else lerp(hsv(h, s * 0.30f, 1f), Color.White, 0.45f),
+        hi = if (day) hsv(h, (s * 0.70f).coerceAtMost(1f), 0.58f) else lerp(hsv(h, s * 0.30f, 1f), Color.White, 0.45f),
         // Close to the accent on the colour wheel and a touch softer: the bands read as shades of the
         // cover's colour, not a rainbow (they used to sit 40 degrees either side at full strength).
         // By day the layers must differ in lightness too (a pale sky swallows hue alone): the warm one
         // is light and the cool one deep, with a slightly wider hue step than at night.
         warm = if (day) hsv(h - 22f, if (neutral) s else s * 0.80f, 0.98f) else hsv(h - 16f, if (neutral) s else s * 0.85f, 1f),
         cool = if (day) hsv(h + 24f, s, 0.58f) else hsv(h + 18f, if (neutral) s else s * 0.85f, 1f),
-        edge = when { day -> hsv(h, s, 0.55f); appNight -> hsv(h, s * 0.25f, 1f); else -> Color.White },
+        ink = if (day) hsv(h, (s * 0.80f).coerceAtMost(1f), 0.50f) else deep,
+        edge = when { day -> hsv(h, s, 0.50f); appNight -> hsv(h, s * 0.25f, 1f); else -> Color.White },
         day = day,
     )
 }
@@ -197,13 +201,15 @@ internal fun beatPulse(t: Float, bpm: Float): Float {
  * freezes it. [pauseOnScroll] also holds it still while any list scrolls, like the page background does.
  */
 @Composable
-internal fun rememberSceneClock(active: Boolean, speed: Float, pauseOnScroll: Boolean = false): State<Float> {
+internal fun rememberSceneClock(active: Boolean, speed: Float, pauseOnScroll: Boolean = false, halfRate: Boolean = false): State<Float> {
     val backdrop = LocalBackdrop.current
-    return produceState(3.2f, active, speed, pauseOnScroll) {
+    return produceState(3.2f, active, speed, pauseOnScroll, halfRate) {
         if (!active || speed <= 0f) return@produceState
         var last = withFrameNanos { it }
         while (true) {
             val now = withFrameNanos { it }
+            // While a video is decoding, redraw the scene at ~30 fps: it frees GPU/CPU time for the video.
+            if (halfRate && now - last < 30_000_000L) continue
             if (pauseOnScroll && now - backdrop.lastScrollNanos < 250_000_000L) { last = now; continue }
             // A slow frame must not make the scene lurch ahead, so one step is capped.
             val dt = (now - last).coerceAtMost(40_000_000L)
@@ -400,7 +406,7 @@ private fun DrawScope.drawSakura(p: ScenePalette, f: SceneField, t: Float, n: In
         val gh = if (hero) h * 0.30f else h * 0.40f
         val gx = if (hero) w * 0.46f else w * 0.40f
         val by = h * 0.74f
-        val col = p.deep.copy(alpha = 0.92f)
+        val col = p.ink.copy(alpha = 0.92f)
         val pw = gh * 0.11f
         drawRoundRect(col, Offset(gx - gw / 2f - pw / 2f, by - gh), Size(pw, gh), CornerRadius(pw / 3f))
         drawRoundRect(col, Offset(gx + gw / 2f - pw / 2f, by - gh), Size(pw, gh), CornerRadius(pw / 3f))
@@ -410,7 +416,7 @@ private fun DrawScope.drawSakura(p: ScenePalette, f: SceneField, t: Float, n: In
     // A blossoming branch: in the corner on the left, on the right for the Home card (its text is on the left).
     val branch: DrawScope.() -> Unit = {
         val bw = h * 0.05f
-        val bark = p.deep.copy(alpha = 0.95f)
+        val bark = p.ink.copy(alpha = 0.95f)
         drawLine(bark, Offset(-2f, h * 0.62f), Offset(h * 0.55f, h * 0.34f), strokeWidth = bw, cap = StrokeCap.Round)
         drawLine(bark, Offset(h * 0.55f, h * 0.34f), Offset(h * 1.30f, h * 0.12f), strokeWidth = bw * 0.8f, cap = StrokeCap.Round)
         drawLine(bark, Offset(h * 0.55f, h * 0.34f), Offset(h * 0.92f, h * 0.55f), strokeWidth = bw * 0.6f, cap = StrokeCap.Round)
@@ -501,8 +507,8 @@ private fun DrawScope.drawStarry(p: ScenePalette, f: SceneField, t: Float, n: In
             drawCircle(Color.White.copy(alpha = a), h * 0.025f, head)
         }
     }
-    drawMountains(path, t, h * 0.70f, p.deep.copy(alpha = 0.92f), 0.02f)
-    val pineCol = lerp(p.deep, Color.Black, 0.30f)
+    drawMountains(path, t, h * 0.70f, p.ink.copy(alpha = 0.92f), 0.02f)
+    val pineCol = lerp(p.ink, Color.Black, 0.30f)
     val px = if (hero) floatArrayOf(0.38f, 0.43f, 0.47f) else floatArrayOf(0.03f, 0.08f, 0.14f, 0.90f, 0.95f)
     for (k in px.indices) drawPine(path, px[k] * w, h * 0.82f, h * (0.26f + 0.08f * f.s[k]), pineCol)
 }
@@ -558,8 +564,8 @@ private fun DrawScope.drawAurora(p: ScenePalette, f: SceneField, t: Float, amp: 
         val xx = fract(f.x[i] + sin(t * 0.5f + f.ph[i]) * 0.02f) * w
         drawCircle(Color.White.copy(alpha = 0.35f + 0.40f * f.s[i]), h * (0.006f + 0.007f * f.s[i]), Offset(xx, yy * h * 0.85f))
     }
-    drawMountains(path, t, h * 0.74f, p.deep.copy(alpha = 0.94f), 0.012f)
-    val pineCol = lerp(p.deep, Color.Black, 0.30f)
+    drawMountains(path, t, h * 0.74f, p.ink.copy(alpha = 0.94f), 0.012f)
+    val pineCol = lerp(p.ink, Color.Black, 0.30f)
     val px = if (hero) floatArrayOf(0.36f, 0.41f, 0.46f) else floatArrayOf(0.04f, 0.09f, 0.15f, 0.86f, 0.92f, 0.97f)
     for (k in px.indices) drawPine(path, px[k] * w, h * 0.84f, h * (0.24f + 0.08f * f.s[k + 3]), pineCol)
 }
@@ -635,7 +641,7 @@ private fun DrawScope.drawProgress(p: ScenePalette, style: SeekStyle, t: Float, 
     val h = size.height
     val w = size.width
     val wide = style == SeekStyle.WAVE
-    drawRect(p.deep.copy(alpha = 0.42f), topLeft = Offset(playX, 0f), size = Size((w - playX).coerceAtLeast(0f), h))
+    drawRect((if (p.day) Color.Black.copy(alpha = 0.10f) else p.deep.copy(alpha = 0.42f)), topLeft = Offset(playX, 0f), size = Size((w - playX).coerceAtLeast(0f), h))
     if (playX > 1f) {
         buildWave(path, 0, playX, t, amp, beat, wide, close = true)
         drawPath(
@@ -651,9 +657,9 @@ private fun DrawScope.drawProgress(p: ScenePalette, style: SeekStyle, t: Float, 
         drawPath(path, p.edge.copy(alpha = if (p.day) 0.95f else 0.70f), style = Stroke(width = (if (p.day) 2.dp else 1.5.dp).toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
     // A hairline, only there to define the pill; it used to be a bright 1.5 dp ring.
-    val sw = 1.dp.toPx()
+    val sw = (if (p.day) 1.5.dp else 1.dp).toPx()
     drawRoundRect(
-        (if (p.day) p.edge.copy(alpha = 0.40f) else p.glow.copy(alpha = 0.22f)), topLeft = Offset(sw / 2f, sw / 2f), size = Size(w - sw, h - sw),
+        (if (p.day) p.edge.copy(alpha = 0.65f) else p.glow.copy(alpha = 0.22f)), topLeft = Offset(sw / 2f, sw / 2f), size = Size(w - sw, h - sw),
         cornerRadius = CornerRadius((h - sw) / 2f), style = Stroke(width = sw),
     )
 }
@@ -711,16 +717,17 @@ fun SceneSeek(
     style: SeekStyle,
     motion: SeekMotion,
     modifier: Modifier = Modifier,
-    height: Dp = 72.dp,
+    height: Dp = 84.dp,
     playing: Boolean = false,
     compact: Boolean = false,
+    halfRate: Boolean = false,
 ) {
     val c = P.colors
     val palette = remember(c.accent, c.bg, c.card, c.dark) { scenePalette(c.accent, 0f, if (c.dark) c.card.copy(alpha = 1f) else c.bg, day = !c.dark) }
     val field = remember(seed) { SceneField(seed) }
     val path = remember { Path() }
     val bpm = remember(seed) { 84f + (abs(seed) % 56L).toFloat() }
-    val clock = rememberSceneClock(playing, motion.speed)
+    val clock = rememberSceneClock(playing, motion.speed, halfRate = halfRate)
     val playK by animateFloatAsState(if (playing) 1f else 0f, tween(500), label = "scenePlay")
 
     var scrub by remember { mutableStateOf<Float?>(null) }
