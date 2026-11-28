@@ -586,7 +586,7 @@ private fun Dock(route: String?, onTab: (String) -> Unit, onNow: () -> Unit, mod
             val on = route == r
             CircleButton(
                 icon, label, { onTab(r) },
-                container = if (on) Color.White else idle,
+                container = if (on) (if (c.dark) c.ink else Color.White) else idle,
                 content = if (on || !c.dark) Color(0xFF151515) else c.text,
             )
         }

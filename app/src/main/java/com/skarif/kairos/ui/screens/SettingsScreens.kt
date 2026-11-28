@@ -366,7 +366,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit, onFolders: () -> Unit,
             Card(Modifier) {
                 Text("Backup and restore", style = T.h2, color = c.text)
                 Text(
-                    "Saves ${favs.size} favourites, ${playlists.size} playlists, listening history, lyrics timing, hidden songs, and all settings to one portable JSON file.",
+                    "Saves ${favs.size} favourites, ${playlists.size} playlists (with their covers), listening history, lyrics timing, hidden songs, and all settings to one portable JSON file. Restoring only adds: nothing you have now is deleted.",
                     style = T.small, color = c.muted,
                 )
                 val lastBackupMs = androidx.compose.runtime.remember {

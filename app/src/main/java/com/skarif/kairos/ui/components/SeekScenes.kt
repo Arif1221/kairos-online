@@ -115,28 +115,49 @@ class ScenePalette(
     /** The accent's hue nudged slightly towards warm and towards cool, for aurora bands and the planet. */
     val warm: Color,
     val cool: Color,
+    /** The bright line along the played wave: white at night, a deeper tint of the accent by day. */
+    val edge: Color = Color.White,
 )
 
 /**
  * @param lift 0 for a night scene, 1 for a bright daytime one (the Home card in the morning and afternoon).
  */
-fun scenePalette(accent: Color, lift: Float = 0f): ScenePalette {
+fun scenePalette(accent: Color, lift: Float = 0f, blend: Color = Color.Unspecified, day: Boolean = false): ScenePalette {
     val hv = FloatArray(3)
     android.graphics.Color.colorToHSV(accent.toArgb(), hv)
     val h = hv[0]
     val neutral = hv[1] < 0.12f // a grey cover stays grey instead of turning red
     val s = if (neutral) hv[1] else hv[1].coerceIn(0.5f, 1f)
     val l = lift.coerceIn(0f, 1f)
+    // The sky is a quiet tint of the cover's colour, not a saturated dark block: less saturated and a
+    // little lighter than before, and (with [blend]) pulled towards the page colour so it sits in the app.
+    var deep = hsv(h, if (neutral) s else (s * 0.55f).coerceIn(0.30f, 0.65f), 0.22f + 0.30f * l)
+    var mid = hsv(h, if (neutral) s else s * 0.70f, 0.48f + 0.28f * l)
+    // In-app night (dark theme, [blend] given): the same quiet look as the day sky, mirrored. A dark
+    // tint of the cover's colour that sits on the dark surface, not a saturated block.
+    val appNight = !day && blend != Color.Unspecified
+    if (appNight) {
+        deep = lerp(hsv(h, if (neutral) s else s * 0.45f, 0.24f), blend, 0.45f)
+        mid = lerp(hsv(h, if (neutral) s else s * 0.38f, 0.40f), blend, 0.35f)
+    }
+    if (day) {
+        // Light theme: a daytime sky, pale at the horizon and a soft tint above it, with the waves a
+        // little deeper so they still read against it. White clouds, petals and stars stay visible high up.
+        deep = hsv(h, if (neutral) s else s * 0.34f, 0.74f)
+        mid = hsv(h, if (neutral) s else s * 0.16f, 0.95f)
+        if (blend != Color.Unspecified) { deep = lerp(deep, blend, 0.15f); mid = lerp(mid, blend, 0.30f) }
+    }
     return ScenePalette(
-        deep = hsv(h, if (neutral) s else (s * 0.9f).coerceAtLeast(0.6f), 0.14f + 0.30f * l),
-        mid = hsv(h, s, 0.38f + 0.30f * l),
-        base = hsv(h, s, 0.92f),
-        glow = hsv(h, s * 0.55f, 1f),
+        deep = deep,
+        mid = mid,
+        base = when { day -> hsv(h, s, 0.78f); appNight -> hsv(h, s * 0.85f, 0.88f); else -> hsv(h, s, 0.92f) },
+        glow = if (day) hsv(h, s * 0.80f, 0.92f) else hsv(h, s * 0.55f, 1f),
         hi = lerp(hsv(h, s * 0.30f, 1f), Color.White, 0.45f),
         // Close to the accent on the colour wheel and a touch softer: the bands read as shades of the
         // cover's colour, not a rainbow (they used to sit 40 degrees either side at full strength).
         warm = hsv(h - 16f, if (neutral) s else s * 0.85f, 1f),
         cool = hsv(h + 18f, if (neutral) s else s * 0.85f, 1f),
+        edge = when { day -> hsv(h, s, 0.62f); appNight -> hsv(h, s * 0.25f, 1f); else -> Color.White },
     )
 }
 
@@ -619,7 +640,7 @@ private fun DrawScope.drawProgress(p: ScenePalette, style: SeekStyle, t: Float, 
         )
         buildWave(path, 0, playX, t, amp, beat, wide, close = false)
         drawPath(path, p.glow.copy(alpha = 0.40f), style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-        drawPath(path, Color.White.copy(alpha = 0.95f), style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(path, p.edge.copy(alpha = 0.95f), style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
     val sw = 1.5.dp.toPx()
     drawRoundRect(
@@ -684,7 +705,7 @@ fun SceneSeek(
     compact: Boolean = false,
 ) {
     val c = P.colors
-    val palette = remember(c.accent) { scenePalette(c.accent) }
+    val palette = remember(c.accent, c.bg, c.card, c.dark) { scenePalette(c.accent, 0f, if (c.dark) c.card.copy(alpha = 1f) else c.bg, day = !c.dark) }
     val field = remember(seed) { SceneField(seed) }
     val path = remember { Path() }
     val bpm = remember(seed) { 84f + (abs(seed) % 56L).toFloat() }
@@ -774,7 +795,7 @@ fun SeekPreview(
         BarsPreview(modifier.height(height), progress, animate, motion)
         return
     }
-    val palette = remember(c.accent) { scenePalette(c.accent) }
+    val palette = remember(c.accent, c.bg, c.card, c.dark) { scenePalette(c.accent, 0f, if (c.dark) c.card.copy(alpha = 1f) else c.bg, day = !c.dark) }
     val field = remember(style) { SceneField(style.ordinal * 977L + 11L) }
     val path = remember { Path() }
     val clock = rememberSceneClock(animate, motion.speed)

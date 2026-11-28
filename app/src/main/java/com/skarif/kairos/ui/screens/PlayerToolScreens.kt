@@ -377,8 +377,8 @@ fun EqualizerSheet(vm: MainViewModel, onBack: () -> Unit) {
             Card(color = c.accent) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("${BANDS[band]} Hz band", Modifier.weight(1f), style = T.title, color = c.onAccent)
-                    CircleButton(Ic.Minus, "Lower ${BANDS[band]} hertz", { setGain(band, -1f) }, size = 44.dp, container = Color.White, content = Color(0xFF151515))
-                    CircleButton(Ic.Plus, "Raise ${BANDS[band]} hertz", { setGain(band, 1f) }, size = 44.dp, container = Color.White, content = Color(0xFF151515))
+                    CircleButton(Ic.Minus, "Lower ${BANDS[band]} hertz", { setGain(band, -1f) }, size = 44.dp, container = if (P.colors.dark) P.colors.chip else Color.White, content = P.colors.text)
+                    CircleButton(Ic.Plus, "Raise ${BANDS[band]} hertz", { setGain(band, 1f) }, size = 44.dp, container = if (P.colors.dark) P.colors.chip else Color.White, content = P.colors.text)
                 }
                 HatchedBars(
                     values = gains.map { (it + 12f) / 24f },
@@ -450,7 +450,7 @@ fun SleepTimerSheet(vm: MainViewModel, onBack: () -> Unit) {
             } else {
                 Card(color = c.accent) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircleButton(Ic.Minus, "Five minutes less", { minutes = (minutes - 5).coerceAtLeast(5); endOfSong = false }, size = 44.dp, container = Color.White, content = Color(0xFF151515))
+                        CircleButton(Ic.Minus, "Five minutes less", { minutes = (minutes - 5).coerceAtLeast(5); endOfSong = false }, size = 44.dp, container = if (P.colors.dark) P.colors.chip else Color.White, content = P.colors.text)
                         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(if (endOfSong) "End of song" else "$minutes min", style = T.big, color = c.onAccent)
                             Text(
@@ -459,7 +459,7 @@ fun SleepTimerSheet(vm: MainViewModel, onBack: () -> Unit) {
                                 style = T.small.copy(fontWeight = FontWeight.SemiBold), color = c.onAccent,
                             )
                         }
-                        CircleButton(Ic.Plus, "Five minutes more", { minutes = (minutes + 5).coerceAtMost(180); endOfSong = false }, size = 44.dp, container = Color.White, content = Color(0xFF151515))
+                        CircleButton(Ic.Plus, "Five minutes more", { minutes = (minutes + 5).coerceAtMost(180); endOfSong = false }, size = 44.dp, container = if (P.colors.dark) P.colors.chip else Color.White, content = P.colors.text)
                     }
                     PillMeter(if (endOfSong) 12 else (minutes / 5).coerceAtMost(12), 12, c.onAccent)
                 }

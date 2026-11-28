@@ -137,13 +137,14 @@ fun PlayerTheme(settings: Settings, album: AlbumColors?, content: @Composable ()
             accent = accent, onAccent = onAccent, dark = true,
         )
     } else if (dark) {
-        // Neutral, slightly cool greys (iOS's system greys) instead of flat #2A2A2A, which looked
+        // Neutral greys with the same slight warmth as the light theme's off-white, instead of flat #2A2A2A, which looked
         // muddy over a coloured background. Elevation goes bg < card < chip.
         PlayerColors(
-            bg = Color(0xFF111112), card = Color(0xFF1C1C1E), text = Color(0xFFF4F4F0), muted = Color(0xFFA9A9A3),
-            ink = Color(0xFFF4F4F0), inkFg = Color(0xFF151515), veil = Color(0xD10E0E10),
-            line = Color(0x29FFFFFF), sheet = Color(0xFF1C1C1E),
-            panel = Color(0xEB161618), chip = Color(0xFF2C2C2E), mini = Color(0xF2262628), dots = Color(0x14FFFFFF),
+            bg = Color(0xFF121211), card = Color(0xFF1D1D1B), text = Color(0xFFF4F4F0), muted = Color(0xFFA9A9A3),
+            // ink = the selected pill and the big round buttons: a soft stone, not near-white glare.
+            ink = Color(0xFFDEDED8), inkFg = Color(0xFF151515), veil = Color(0xD10E0E10),
+            line = Color(0x29FFFFFF), sheet = Color(0xFF1D1D1B),
+            panel = Color(0xEB161615), chip = Color(0xFF2B2B29), mini = Color(0xF2262624), dots = Color(0x14FFFFFF),
             accent = accent, onAccent = onAccent, dark = true,
         )
     } else {

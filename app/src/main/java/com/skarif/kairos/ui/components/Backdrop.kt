@@ -114,7 +114,7 @@ class BackdropState {
 // How much of the theme's veil is drawn over the living cover (was 0.88 / 0.42 / 0.52 / 0.86 / 0.72).
 // Lower = more cover colour shows through; raise VEIL_MID if text over a very bright cover gets hard to read.
 private const val VEIL_EDGE = 0.58f
-private const val VEIL_MID = 0.22f
+private const val VEIL_MID = 0.30f
 private const val VEIL_MID_PURE = 0.30f
 private const val VEIL_LIGHT = 0.40f
 
@@ -158,8 +158,10 @@ fun rememberBackdrop(art: Bitmap?, enabled: Boolean, playing: Boolean = false, g
             val tiny = blurredTiny(art)
             // Light theme: lift the cover's brightness (keeping hue and saturation), so a dark cover
             // becomes a bright pastel instead of a muddy grey-purple under the pale veil.
-            val shown = if (dark) tiny else lifted(tiny, LIGHT_FLOOR)
-            Triple(saturated(shown, if (dark) 1.55f else 1.25f), coverTints(tiny), lumaOf(shown))
+            // Dark theme, the mirror image: a bright cover is brought down to a deep, rich tone (no neon),
+            // so both themes read as the same soft, tinted page.
+            val shown = if (dark) dimmed(tiny, DARK_CEILING) else lifted(tiny, LIGHT_FLOOR)
+            Triple(saturated(shown, if (dark) 1.15f else 1.25f), coverTints(tiny), lumaOf(shown))
         }
         val next = built?.first
         if (next === state.current) return@LaunchedEffect
@@ -386,7 +388,7 @@ private fun DrawScope.drawTints(tints: CoverTints, alpha: Float, t: Float, dark:
     if (alpha <= 0f) return
     val tau = 2f * PI.toFloat()
     // Less glow setting = heavier veil = quieter tints.
-    val strength = (if (dark) 0.42f else 0.30f) * (0.4f + 0.6f * glow) * alpha * boost
+    val strength = (if (dark) 0.30f else 0.30f) * (0.4f + 0.6f * glow) * alpha * boost
     val r = maxOf(size.width, size.height) * 0.8f
     val c1 = Offset(size.width * (0.28f + 0.22f * sin(t * tau / 13f)), size.height * (0.22f + 0.14f * sin(t * tau / 9f + 1.1f)))
     val c2 = Offset(size.width * (0.74f + 0.20f * sin(t * tau / 11f + 2.3f)), size.height * (0.78f + 0.14f * sin(t * tau / 8f + 0.4f)))
@@ -402,6 +404,9 @@ private fun dotTile(step: Int, radius: Float, color: Color): ImageBitmap {
     return bmp.asImageBitmap()
 }
 
+/** Dark theme: the brightest a cover pixel may be (HSV value, 0..1). Lower for deeper, calmer colour. */
+private const val DARK_CEILING = 0.62f
+
 /** Light theme: the darkest a cover pixel may be (HSV value, 0..1). Raise for brighter, lower for more contrast. */
 private const val LIGHT_FLOOR = 0.66f
 
@@ -415,6 +420,21 @@ internal fun lifted(img: ImageBitmap, floor: Float): ImageBitmap {
     for (i in px.indices) {
         android.graphics.Color.colorToHSV(px[i], hsv)
         hsv[2] = floor + (1f - floor) * hsv[2]
+        px[i] = android.graphics.Color.HSVToColor(px[i] ushr 24, hsv)
+    }
+    return Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888).asImageBitmap()
+}
+
+/** [img] with HSV value scaled to 0..[ceiling]: hue and saturation stay, glare goes. */
+internal fun dimmed(img: ImageBitmap, ceiling: Float): ImageBitmap {
+    val w = img.width
+    val h = img.height
+    val px = IntArray(w * h)
+    img.readPixels(px)
+    val hsv = FloatArray(3)
+    for (i in px.indices) {
+        android.graphics.Color.colorToHSV(px[i], hsv)
+        hsv[2] = hsv[2] * ceiling
         px[i] = android.graphics.Color.HSVToColor(px[i] ushr 24, hsv)
     }
     return Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888).asImageBitmap()

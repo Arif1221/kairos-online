@@ -147,7 +147,8 @@ fun CircleButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     size: Dp = 52.dp,
-    container: Color = P.colors.card,
+    // Dark theme: one step above the card, so a button on a card (or the page) still reads as a button.
+    container: Color = if (P.colors.dark) P.colors.chip else P.colors.card,
     content: Color = P.colors.text,
     iconSize: Dp = 20.dp,
 ) {
@@ -192,7 +193,7 @@ fun Pill(
     val bg = when {
         accent -> c.accent
         selected -> c.ink
-        else -> LocalPillContainer.current ?: c.card
+        else -> LocalPillContainer.current ?: if (c.dark) c.chip else c.card
     }
     val fg = when {
         accent -> c.onAccent
@@ -399,7 +400,7 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mod
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(com.skarif.kairos.ui.theme.Radius.item))
-            .background(c.line.copy(alpha = 0.5f))
+            .background(if (c.dark) c.chip else c.line.copy(alpha = 0.5f))
             .padding(4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {

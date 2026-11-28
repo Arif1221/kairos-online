@@ -611,6 +611,11 @@ fun CollectionActionsSheet(
             }
             val manage = if (pid == null) emptyList() else listOf(
                 SheetAction("Rename", Ic.Edit, keepOpen = true) { renaming = true },
+                SheetAction("Sort by", Ic.Sort, submenu = com.skarif.kairos.ui.PlaylistSort.entries.map { o -> SheetAction(o.label) { vm.sortPlaylist(pid, o) } }),
+                SheetAction("Duplicate playlist", Ic.PlaylistAdd) { vm.duplicatePlaylist(pid) },
+            ) + (if (songs.map { it.id }.distinct().size < songs.size) listOf(
+                SheetAction("Remove duplicate songs", Ic.Trash) { vm.removePlaylistDuplicates(pid) },
+            ) else emptyList()) + listOf(
                 SheetAction("Delete playlist", Ic.Trash, destructive = true, keepOpen = true) { deleting = true },
             )
             ActionSheet(

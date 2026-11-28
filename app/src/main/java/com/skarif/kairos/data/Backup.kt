@@ -25,9 +25,15 @@ import org.json.JSONObject
  */
 class Backup(private val db: PlayerDatabase, private val settings: SettingsStore) {
 
+    companion object {
+        /** 2: playlists carry their custom cover. Version 1 files restore as before. */
+        const val VERSION = 2
+    }
+
     data class Result(val favourites: Int, val playlists: Int, val plays: Int, val missingSongs: Int)
 
-    suspend fun export(songs: List<SongEntity>): String {
+    /** [covers]: playlist id -> its custom cover image, saved inside the backup so they come back too. */
+    suspend fun export(songs: List<SongEntity>, covers: Map<Long, java.io.File> = emptyMap()): String {
         val byId = songs.associateBy { it.id }
         // Each song once; everything else points at its index.
         val index = LinkedHashMap<Long, Int>()
@@ -46,8 +52,12 @@ class Backup(private val db: PlayerDatabase, private val settings: SettingsStore
         val items = db.playlists().allItems().groupBy { it.playlistId }
         val lists = JSONArray().apply {
             db.playlists().allLists().forEach { p ->
-                put(JSONObject().put("name", p.name).put("createdAt", p.createdAt)
-                    .put("songs", JSONArray().apply { items[p.id].orEmpty().sortedBy { it.position }.forEach { i -> ref(i.songId)?.let { put(it) } } }))
+                val o = JSONObject().put("name", p.name).put("createdAt", p.createdAt)
+                    .put("songs", JSONArray().apply { items[p.id].orEmpty().sortedBy { it.position }.forEach { i -> ref(i.songId)?.let { put(it) } } })
+                covers[p.id]?.let { f ->
+                    runCatching { android.util.Base64.encodeToString(f.readBytes(), android.util.Base64.NO_WRAP) }.getOrNull()?.let { o.put("cover", it) }
+                }
+                put(o)
             }
         }
         val plays = JSONArray().apply {
@@ -79,15 +89,17 @@ class Backup(private val db: PlayerDatabase, private val settings: SettingsStore
             .put("searchVideosFirst", s.searchVideosFirst)
             .put("seekStyle", s.seekStyle.name).put("seekMotion", s.seekMotion.name).put("homeCardStyle", s.homeCardStyle.name)
         return JSONObject()
-            .put("app", "Kairos").put("version", 1).put("createdAt", System.currentTimeMillis())
+            .put("app", "Kairos").put("version", VERSION).put("createdAt", System.currentTimeMillis())
             .put("songs", songArr).put("favourites", favs).put("playlists", lists).put("plays", plays).put("lyricsOffsets", offsets)
             .put("hidden", refs(s.hiddenSongs)).put("snoozed", snoozed).put("tasteExcluded", refs(s.tasteExcluded)).put("settings", prefs)
             .toString()
     }
 
-    suspend fun restore(json: String, songs: List<SongEntity>): Result {
+    /** [saveCover] stores a playlist's cover image (playlist id, JPEG bytes) for a playlist this restore created. */
+    suspend fun restore(json: String, songs: List<SongEntity>, saveCover: (Long, ByteArray) -> Unit = { _, _ -> }): Result {
         val root = JSONObject(json)
         require(root.optString("app") == "Kairos") { "Not a Kairos backup" }
+        require(root.optInt("version", 1) <= VERSION) { "This backup was made by a newer Kairos. Update the app first" }
         val matcher = SongMatcher(songs)
         val arr = root.getJSONArray("songs")
         var missing = 0
@@ -136,7 +148,10 @@ class Backup(private val db: PlayerDatabase, private val settings: SettingsStore
                 val name = p.getString("name")
                 if ((name to ids) in have) continue
                 val finalName = if (existing.any { it.name == name }) "$name (restored)" else name
-                db.playlists().create(finalName, ids)
+                val newId = db.playlists().create(finalName, ids)
+                p.optString("cover").takeIf { it.isNotEmpty() }?.let { enc ->
+                    runCatching { saveCover(newId, android.util.Base64.decode(enc, android.util.Base64.DEFAULT)) }
+                }
                 listCount++
             }
         }

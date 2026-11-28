@@ -89,6 +89,11 @@ sealed interface ScanState {
     data class Done(val songs: Int) : ScanState
 }
 
+/** How "Sort by" reorders a playlist. */
+enum class PlaylistSort(val label: String) {
+    TITLE("Title"), ARTIST("Artist"), ALBUM("Album"), NEWEST("Newest first"), OLDEST("Oldest first"), REVERSE("Reverse order"), SHUFFLE("Shuffle order"),
+}
+
 /** A list of songs shown with the album-style screen: albums, playlists and mixes. */
 data class Collection(val key: String, val title: String, val subtitle: String, val songs: List<SongEntity>, val playlistId: Long? = null)
 
@@ -552,7 +557,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun backupTo(uri: Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
-                val json = backup.export(ct.db.songs().observeAll().first())
+                val json = backup.export(ct.db.songs().observeAll().first(), playlistCovers.value)
                 getApplication<Application>().contentResolver.openOutputStream(uri, "wt")!!.use { it.write(json.toByteArray()) }
                 getApplication<Application>().getSharedPreferences("backup", android.content.Context.MODE_PRIVATE)
                     .edit().putLong("last_backup_at", System.currentTimeMillis()).apply()
@@ -564,7 +569,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 val json = getApplication<Application>().contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
-                backup.restore(json, ct.db.songs().observeAll().first())
+                backup.restore(json, ct.db.songs().observeAll().first()) { id, bytes ->
+                    java.io.File(coverDir, "$id-${System.currentTimeMillis()}.jpg").writeBytes(bytes)
+                }.also { _covers.value = readCovers() }
             }.onSuccess { r ->
                 toast(
                     "Restored ${r.favourites} favourites, ${r.playlists} playlists, ${r.plays} plays" +
@@ -1082,6 +1089,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val before = p.songs.map { it.id }
         viewModelScope.launch { ct.db.playlists().replaceSongs(id, before.toMutableList().apply { removeAt(index) }) }
         notify("Removed ${p.songs[index].title} from ${p.name}") { viewModelScope.launch { ct.db.playlists().replaceSongs(id, before) } }
+    }
+
+    /** Reorders a whole playlist; Undo brings the old order back. */
+    fun sortPlaylist(id: Long, by: PlaylistSort) {
+        val p = playlists.value.firstOrNull { it.id == id } ?: return
+        val before = p.songs.map { it.id }
+        val ci = String.CASE_INSENSITIVE_ORDER
+        val sorted = when (by) {
+            PlaylistSort.TITLE -> p.songs.sortedWith(compareBy<SongEntity, String>(ci) { it.title })
+            PlaylistSort.ARTIST -> p.songs.sortedWith(compareBy<SongEntity, String>(ci) { it.artist }.thenBy(ci) { it.title })
+            PlaylistSort.ALBUM -> p.songs.sortedWith(compareBy<SongEntity, String>(ci) { it.album }.thenBy { it.track })
+            PlaylistSort.NEWEST -> p.songs.sortedByDescending { it.dateAddedSec }
+            PlaylistSort.OLDEST -> p.songs.sortedBy { it.dateAddedSec }
+            PlaylistSort.REVERSE -> p.songs.reversed()
+            PlaylistSort.SHUFFLE -> p.songs.shuffled()
+        }.map { it.id }
+        if (sorted == before) return
+        viewModelScope.launch { ct.db.playlists().replaceSongs(id, sorted) }
+        notify("${p.name}: ${by.label.lowercase()}") { viewModelScope.launch { ct.db.playlists().replaceSongs(id, before) } }
+    }
+
+    /** Keeps each song's first place in the playlist and drops the repeats. */
+    fun removePlaylistDuplicates(id: Long) {
+        val p = playlists.value.firstOrNull { it.id == id } ?: return
+        val before = p.songs.map { it.id }
+        val after = before.distinct()
+        if (after.size == before.size) { notify("No duplicates in ${p.name}"); return }
+        viewModelScope.launch { ct.db.playlists().replaceSongs(id, after) }
+        notify("Removed ${before.size - after.size} duplicates from ${p.name}") { viewModelScope.launch { ct.db.playlists().replaceSongs(id, before) } }
+    }
+
+    fun duplicatePlaylist(id: Long) {
+        val p = playlists.value.firstOrNull { it.id == id } ?: return
+        viewModelScope.launch { ct.db.playlists().create("${p.name} copy", p.songs.map { it.id }) }
+        notify("Duplicated ${p.name}")
     }
 
     fun moveInPlaylist(id: Long, from: Int, to: Int) {
